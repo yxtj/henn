@@ -4,9 +4,54 @@ import numpy as np
 import warnings
 import heutil
 
+# %% helper for display
+
+def _addindent(s_, numSpaces):
+    s = s_.split('\n')
+    # don't do anything for single-line stuff
+    if len(s) == 1:
+        return s_
+    first = s.pop(0)
+    s = [(numSpaces * ' ') + line for line in s]
+    s = '\n'.join(s)
+    s = first + '\n' + s
+    return s
+
+# %% HE layers
+
 class ENNLayer():
     def forward(self, x):
         return x
+    
+    def extra_repr(self):
+        return ""
+    
+    def get_modules(self):
+        modules = {}
+        for k, v in self.__dict__.items():
+            if isinstance(v, ENNLayer):
+                modules[k] = v
+        return modules
+    
+    def __repr__(self):
+        extra_repr = self.extra_repr()
+        extra_lines = [] if not extra_repr else extra_repr.split('\n')
+        child_lines = []
+        for key, module in self.get_modules().items():
+            mod_str = repr(module)
+            mod_str = _addindent(mod_str, 2)
+            child_lines.append('(' + key + '): ' + mod_str)
+        lines = extra_lines + child_lines
+        
+        main_str = self.__class__.__name__ + '('
+        if lines:
+            # simple one-liner info, which most builtin Modules will use
+            if len(extra_lines) == 1 and not child_lines:
+                main_str += extra_lines[0]
+            else:
+                main_str += '\n  ' + '\n  '.join(lines) + '\n'
+        main_str += ')'
+        return main_str
     
     def __call__(self, x):
         return self.forward(x)
@@ -15,6 +60,9 @@ class ENNLayer():
 class Identity(ENNLayer):
     def forward(self, x):
         return x
+    
+    def __repr__(self):
+        return "Identity()"
 
 
 class ENNLayer2dBase(ENNLayer):
@@ -50,15 +98,20 @@ class Linear(ENNLayer):
         super().__init__()
         self.in_ch = in_ch
         self.out_ch = out_ch
+        self.w_bias = bias
         self.weight = None
         self.bias = None
         #self.weight = (np.random.random((in_ch, out_ch)) - 0.5)
         #self.bias = (np.random.random(out_ch) - 0.5)
+    
+    def extra_repr(self):
+        return f"in={self.in_ch}, out={self.out_ch}, bias={self.w_bias}"
 
     def bind(self, weight:np.ndarray, bias:np.ndarray):
         assert weight.ndim == 2
-        assert bias.ndim == 1
-        assert weight.shape[0] == bias.shape[0]
+        assert (self.w_bias == False and bias is None) or \
+            (self.w_bias == True and bias.ndim == 1)
+        assert self.w_bias == False or weight.shape[0] == bias.shape[0]
         if weight.shape != (self.out_ch, self.in_ch):
             warnings.warn('shape not match: (%d,%d) vs ref (%d,%d)' %
                           (self.out_ch, self.in_ch, *weight.shape))
@@ -67,41 +120,10 @@ class Linear(ENNLayer):
         self.bias = weight
         
     def forward(self, x):
-        return np.dot(self.weight, x) + self.bias
-    
-        out = np.empty(self.out_ch, x.dtype)
-        for i in range(self.out_ch):
-            out[i] = heutil.sum_list(self.weight[i] * x) + self.bias[i]
-        return out
-
-
-class BiLinear(ENNLayer):
-    def __init__(self, in1_ch:int, in2_ch:int, out_ch:int, bias=True):
-        super().__init__()
-        self.in1_ch= in1_ch
-        self.in2_ch = in2_ch
-        self.out_ch = out_ch
-        self.weight = None
-        self.bias = None
-        #self.weight = (np.random.random((in_ch, out_ch)) - 0.5)
-        #self.bias = (np.random.random(out_ch) - 0.5)
-
-    def bind(self, weight:np.ndarray, bias:np.ndarray):
-        assert weight.ndim == 3
-        assert bias.ndim == 1
-        assert weight.shape[0] == bias.shape[0]
-        if weight.shape != (self.out_ch, self.in1_ch, self.in2_ch):
-            warnings.warn('shape not match: (%d,%d,%d) vs ref (%d,%d,%d)' %
-                          (self.out_ch, self.in1_ch, self.in2_ch, *weight.shape))
-        self.weight = weight
-        self.bias = bias
-        
-    def forward(self, x1, x2):
-        # y = x1^T A x2 + b
-        out = np.empty(self.out_ch, x1.dtype)
-        for k in range(self.out_ch):
-            t = np.dot(x1, self.weight[k])
-            out = np.dot(t, x2) + self.bias[k]
+        #return np.dot_product(self.weight, x) + self.bias
+        out = heutil.dot_product_21(self.weight, x)
+        if self.bias:
+            out += self.bias
         return out
 
 
@@ -110,7 +132,7 @@ class BiLinear(ENNLayer):
 class ActivationSquare(ENNLayer):
     def forward(self, x):
         return x * x
-
+    
 
 class ActivationTanh3(ENNLayer):
     def forward(self, x):
@@ -147,10 +169,16 @@ class Pooling2dBase(ENNLayer2dBase):
 
 
 class AvgPool2d(Pooling2dBase):
-    def __init__(self, kernel_size, stride=1, padding=0,
+    def __init__(self, kernel_size, stride=None, padding=0,
                  ceil_mode=False, count_include_pad=True):
+        if stride is None:
+            stride = kernel_size
         super().__init__(kernel_size, stride, padding, ceil_mode)
         self.count_include_pad = count_include_pad
+    
+    def extra_repr(self):
+        return f"kernel={self.kernel_size}, stride={self.stride}, "\
+            f"padding={self.padding}, ceil_mode={self.ceil_mode}"
         
     def forward(self, x):
         nch, sx, sy = x.shape
@@ -171,8 +199,14 @@ class AvgPool2d(Pooling2dBase):
  
  
 class MaxPool2d(Pooling2dBase):
-    def __init__(self, kernel_size, stride=1, padding=0, ceil_mode=False):
+    def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False):
+        if stride is None:
+            stride = kernel_size
         super().__init__(kernel_size, stride, padding, ceil_mode)
+    
+    def extra_repr(self):
+        return f"kernel={self.kernel_size}, stride={self.stride}, "\
+            f"padding={self.padding}, ceil_mode={self.ceil_mode}"
     
     def forward(self, x):
         # max = ( (a+b) + sign(a-b)*(a-b) )/2
@@ -203,6 +237,9 @@ class AdaptiveAvgPool2d(ENNLayer):
         assert len(output_size) == 2
         self.output_size = output_size
         
+    def extra_repr(self):
+        return f"output_size={self.output_size}"
+        
     def forward(self, x):
         nc, sx, sy = x.shape
         ox = sx if self.output_size[0] is None else self.output_size[0]
@@ -232,14 +269,22 @@ class Conv2d(ENNLayer2dBase):
         assert in_ch % groups == 0
         self.in_ch_pg = in_ch // groups # in channles per group
         self.out_ch_pg = out_ch // groups
+        self.w_bias = bias
         self.weight = None
         self.bias = None
+    
+    def extra_repr(self):
+        return f"{self.in_ch}, {self.out_ch}, "\
+            f"kernel_size={self.kernel_size}), stride={self.stride}, "\
+            f"padding={self.padding}, bias={self.w_bias}"
     
     def bind(self, weight:np.ndarray, bias:np.ndarray, groups:int=1,
              stride:int=None, padding:int=None):
         assert weight.ndim == 4
-        assert bias.ndim == 1
-        assert weight.shape[0] == bias.shape[0]
+        assert weight.shape == (self.out_ch, self.in_ch_pg, *self.kernel_size)
+        assert (self.w_bias == False and bias is None) or \
+            (self.w_bias == True and bias.ndim == 1)
+        assert self.w_bias == False or bias.shape[0] == self.out_ch
         if self.groups != groups:
             warnings.warn("number of groups does not match: (%d) vs ref (%f)" %
                           (self.groups, groups))
@@ -321,6 +366,9 @@ class BatchNorm2d(ENNLayer):
         self.momentum = momentum
         self.r = 1.0
         self.b = 0.0
+        
+    def extra_repr(self):
+        return f"{self.num_feat}, eps={self.eps}, momentum={self.momentum}"
     
     def reset(self):
         self.r = 1.0
@@ -345,6 +393,9 @@ class LocalResponseNorm2d(ENNLayer):
         self.beta = beta
         self.k = k
     
+    def extra_repr(self):
+        return "{self.size}, alpha={self.alpha}, beta={self.beta}, k={self.k}"
+    
     def forward(self, x):
         nch, nx, ny = x.shape
         d = x*x
@@ -366,6 +417,10 @@ class Sequential(ENNLayer):
     def __init__(self, layers):
         super().__init__()
         self.layers = layers
+    
+    def extra_repr(self):
+        body = "\n".join([f"({i}): {l}" for i,l in enumerate(self.layers)])
+        return body
     
     def forward(self, x):
         for l in self.layers:
