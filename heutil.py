@@ -33,14 +33,51 @@ def var_list(x, mean=None):
     if mean is None:
         mean = avg_list(x)
     return m2 - mean*mean
-    
-def dot_product(x, w):
+
+
+# %% dot product
+
+def dot_product(a, b):
+    if a.ndim == 1:
+        if b.ndim == 1:
+            return dot_product_11(a,b)
+        else:
+            return dot_product_12(a, b)
+    else:
+        if b.ndim == 1:
+            return dot_product_21(a,b)
+        else:
+            return dot_product_22(a, b)
+
+def dot_product_11(w, x):
     assert x.ndim == w.ndim == 1
     assert len(x) == len(w)
     y = x*w
     return sum_list(y)
 
+def dot_product_21(m, x):
+    assert m.ndim == 2
+    assert x.ndim == 1
+    assert m.shape[1] == len(x)
+    out = np.array([ dot_product_11(m[i], x) for i in range(m.shape[0]) ])
+    return out
 
+def dot_product_12(x, m):
+    assert x.ndim == 1
+    assert m.ndim == 2
+    assert len(x) == m.shape[0]
+    out = np.array([ dot_product_11(x, m[:,i]) for i in range(m.shape[1]) ])
+    return out
+
+def dot_product_22(a, b):
+    assert a.ndim == 2
+    assert b.ndim == 2
+    assert a.shape[1] == b.shape[0]
+    out = np.empty((a.shape[0], b.shape[1]), dtype=a.dtype)
+    for i in range(a.shape[0]):
+        for j in range(b.shape[1]):
+            out[i,j] = dot_product_11(a[i], b[:,j])
+    return out
 
 # %% max with polynomial approximation
 
