@@ -40,7 +40,7 @@ class BasicBlock(hennlayer.ENNLayer):
         self.bn2 = norm_layer(out_ch)
         self.downsample = downsample
         self.stride = stride
-    
+        
     def forward(self, x):
         identity = x
         
