@@ -94,15 +94,17 @@ class ENNLayer2dBase(ENNLayer):
 # %% linear layers
 
 class Linear(ENNLayer):
-    def __init__(self, in_ch:int, out_ch:int, bias=True):
+    def __init__(self, in_ch:int, out_ch:int, bias=True, init=False):
         super().__init__()
         self.in_ch = in_ch
         self.out_ch = out_ch
         self.w_bias = bias
         self.weight = None
         self.bias = None
-        #self.weight = (np.random.random((in_ch, out_ch)) - 0.5)
-        #self.bias = (np.random.random(out_ch) - 0.5)
+        if init:
+            self.weight = np.random.normal(size=(in_ch, out_ch))
+            if bias:
+                self.bias = np.random.normal(size=out_ch)
     
     def extra_repr(self):
         return f"in={self.in_ch}, out={self.out_ch}, bias={self.w_bias}"
@@ -261,7 +263,7 @@ class AdaptiveAvgPool2d(ENNLayer):
 # %% convolution layers
 class Conv2d(ENNLayer2dBase):
     def __init__(self, in_ch, out_ch, kernel_size, stride=1, padding=0,
-                 groups=1, bias=True):
+                 groups=1, bias=True, init=False):
         super().__init__(kernel_size, stride, padding, False)
         self.in_ch = in_ch
         self.out_ch = out_ch
@@ -272,6 +274,10 @@ class Conv2d(ENNLayer2dBase):
         self.w_bias = bias
         self.weight = None
         self.bias = None
+        if init:
+            self.weight = np.random.normal(size=(self.out_ch, self.in_ch_pg, *self.kernel_size))
+            if bias:
+                self.bias = np.random.normal(size=out_ch)
     
     def extra_repr(self):
         return f"{self.in_ch}, {self.out_ch}, "\
