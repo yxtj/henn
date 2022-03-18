@@ -31,6 +31,10 @@ class ENNLayer():
         for k, v in self.__dict__.items():
             if isinstance(v, ENNLayer):
                 modules[k] = v
+        # for Sequential:
+        if hasattr(self, 'layers'):
+            for i,m in enumerate(self.layers):
+                modules[str(i)] = m
         return modules
     
     def __repr__(self):
@@ -348,7 +352,9 @@ class Conv2d(ENNLayer2dBase):
         cut = x[ch_f:ch_l, max(0, i_f):i_l, max(0, j_f):j_l]
         cut = cut*self.weight[ch, :, wi_f:wi_l, wj_f:wj_l]
         #r = cut.sum() + float(self.bias[ch])
-        r = heutil.sum_list(cut) + float(self.bias[ch])
+        r = heutil.sum_list(cut.ravel())
+        if self.bias:
+            r += float(self.bias[ch])
         return r
     
     def forward(self, x):
@@ -357,8 +363,11 @@ class Conv2d(ENNLayer2dBase):
         ox, oy = self.comp_out_size(sx, sy)
         out = np.empty((self.out_ch, ox, oy), x.dtype)
         for ch in range(self.out_ch):
+            print('ch',ch)
             for i in range(ox):
+                #print('  i',i)
                 for j in range(oy):
+                    #print('    j',j)
                     out[ch,i,j] = self.conv(x, ch, i, j)
         return out
 
@@ -423,10 +432,6 @@ class Sequential(ENNLayer):
     def __init__(self, layers):
         super().__init__()
         self.layers = layers
-    
-    def extra_repr(self):
-        body = "\n".join([f"({i}): {l}" for i,l in enumerate(self.layers)])
-        return body
     
     def forward(self, x):
         for l in self.layers:
