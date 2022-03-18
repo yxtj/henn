@@ -97,7 +97,7 @@ class Bottleneck(hennlayer.ENNLayer):
 
 # %% resnet
 
-class ResNet:
+class ResNet(hennlayer.ENNLayer):
     def __init__(self, block, layers, num_classes:int=1000,
                  groups:int=1, width_per_group:int=64):
         self.num_classes = num_classes
@@ -117,6 +117,9 @@ class ResNet:
         self.layer4 = self._make_layer(block, 512, layers[3], stride=2)
         self.avgpool = hennlayer.AdaptiveAvgPool2d((1, 1))
         self.fc = hennlayer.Linear(512 * block.expansion, num_classes)
+
+    def bind(self, resnet):
+        pass
 
     def _make_layer(self, block, planes, blocks, stride=1):
         downsample = None
@@ -180,3 +183,21 @@ def resnet101(**kwargs):
 
 def resnet152(**kwargs):
     return ResNet(Bottleneck, [3, 8, 36, 3], **kwargs)
+
+
+# %% bind weights from pytorch
+
+#import torch
+
+def bind(he_model, torch_model):
+    for name,module in he_model.get_modules().items():
+        if hasattr(torch_model, name):
+            print(name)
+            tm = torch_model._modules[name]
+            if hasattr(module, 'weight'):
+                module.weight = tm.weight.data.detach().numpy()
+            if hasattr(module, 'bias') and tm.bias is not None:
+                module.bias = tm.bias.data.detach().numpy()
+            if len(module.get_modules()) != 0:
+                bind(module, tm)
+    
