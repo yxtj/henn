@@ -10,15 +10,11 @@ import numpy as np
 #%% sum
 
 def sum_list(x):
-    if not isinstance(x, (list, np.ndarray)):
-        return input
     n = len(x)
-    if n == 1:
-        return x[0]
-    elif n == 2:
-        return x[0] + x[1]
-    else:
+    if n > 2:
         return sum_list(x[:n//2]) + sum_list(x[n//2:])
+    else:
+        return sum(x)
     
 
 def avg_list(x):
