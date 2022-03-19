@@ -351,10 +351,10 @@ class Conv2d(ENNLayer2dBase):
         #i_l, j_l = min(nx, i_l), min(ny, j_l)
         cut = x[ch_f:ch_l, max(0, i_f):i_l, max(0, j_f):j_l]
         cut = cut*self.weight[ch, :, wi_f:wi_l, wj_f:wj_l]
-        #r = cut.sum() + float(self.bias[ch])
         r = heutil.sum_list(cut.ravel())
+        r = cut.sum()
         if self.bias:
-            r += float(self.bias[ch])
+            r += self.bias[ch]
         return r
     
     def forward(self, x):
@@ -363,7 +363,7 @@ class Conv2d(ENNLayer2dBase):
         ox, oy = self.comp_out_size(sx, sy)
         out = np.empty((self.out_ch, ox, oy), x.dtype)
         for ch in range(self.out_ch):
-            print('ch',ch)
+            #print('ch',ch)
             for i in range(ox):
                 #print('  i',i)
                 for j in range(oy):

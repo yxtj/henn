@@ -154,7 +154,7 @@ class ResNet(hennlayer.ENNLayer):
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
-        x = self.maxpool(x)
+        x = self.pool1(x)
 
         x = self.layer1(x)
         x = self.layer2(x)
@@ -192,7 +192,7 @@ def resnet152(**kwargs):
 def bind(he_model, torch_model):
     for name,module in he_model.get_modules().items():
         if hasattr(torch_model, name):
-            print(name)
+            #print(name)
             tm = torch_model._modules[name]
             if hasattr(module, 'weight'):
                 module.weight = tm.weight.data.detach().numpy()
