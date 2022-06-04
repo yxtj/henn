@@ -43,7 +43,7 @@ def test(model, test_loader, criterion):
 
     # model in evaluation mode
     model.eval()
-
+    t = time.time()
     for data, target in test_loader:
         with torch.no_grad():
             output = model(data)
@@ -58,10 +58,11 @@ def test(model, test_loader, criterion):
             label = target.data[i]
             class_correct[label] += correct[i].item()
             class_total[label] += 1
-
+    t = time.time() - t
+    
     # calculate and print avg test loss
     test_loss = test_loss/len(test_loader)
-    print(f'Test Loss: {test_loss:.6f}\n')
+    print(f'Test Loss: {test_loss:.6f}, Time: {t:.6f}\n')
 
     for label in range(10):
         print(

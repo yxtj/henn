@@ -151,7 +151,9 @@ class ActivationTanh3(ENNLayer):
 
 class ActivationReLU(ENNLayer):
     def forward(self, x):
-        return (x + heutil.sign(x)*x) / 2
+        shape = x.shape
+        out = np.array([heutil.relu(i) for i in x.ravel()]).reshape(shape)
+        return out
 
 
 # %% pooling layers
@@ -195,7 +197,7 @@ class AvgPool2d(Pooling2dBase):
                 for j in range(oy):
                     o = self.pick_data(x, ch, i, j)
                     #s = o.sum()
-                    s = heutil.sum_list(o)
+                    s = heutil.hesum(o)
                     if self.count_include_pad or o.size == self.size:
                         out[ch, i,j] = s*self.factor
                     else:
@@ -223,7 +225,7 @@ class MaxPool2d(Pooling2dBase):
             for i in range(ox):
                 for j in range(oy):
                     o = self.pick_data(x, ch, i, j)
-                    out[ch, i,j] = heutil.max_list(o, quick=True)
+                    out[ch, i,j] = heutil.hemaxl(o, quick=True)
         return out
 
 # adaptive pooling
@@ -259,7 +261,7 @@ class AdaptiveAvgPool2d(ENNLayer):
         for ch in range(nc):
             for i, (xf, xl) in enumerate(rng_x):
                 for j, (yf, yl) in enumerate(rng_y):
-                    t = heutil.avg_list(x[ch, xf:xl, yf:yl])
+                    t = heutil.heavg(x[ch, xf:xl, yf:yl])
                     out[ch,i,j] = t
         return out
 
@@ -351,7 +353,7 @@ class Conv2d(ENNLayer2dBase):
         #i_l, j_l = min(nx, i_l), min(ny, j_l)
         cut = x[ch_f:ch_l, max(0, i_f):i_l, max(0, j_f):j_l]
         cut = cut*self.weight[ch, :, wi_f:wi_l, wj_f:wj_l]
-        r = heutil.sum_list(cut.ravel())
+        r = heutil.hesum(cut.ravel())
         r = cut.sum()
         if self.bias:
             r += self.bias[ch]
@@ -392,8 +394,8 @@ class BatchNorm2d(ENNLayer):
     def forward(self, x):
         shape = x.shape
         assert x.ndim == 3 and shape[0] == self.num_feat
-        e = heutil.avg_list(x)
-        v = heutil.var_list(x, e)
+        e = heutil.heavg(x)
+        v = heutil.hevar(x, e)
         up = x - e
         down = heutil.sqrt(v + self.eps)
         y = up / down * self.r + self.b
@@ -421,7 +423,7 @@ class LocalResponseNorm2d(ENNLayer):
             factor = self.alpha/(c_l-c_f)
             for i in range(nx):
                 for j in range(ny):
-                    r = heutil.sum_list(d[c_f:c_l,i,j].ravel())*factor + self.k
+                    r = heutil.hesum(d[c_f:c_l,i,j].ravel())*factor + self.k
                     r = r**(-self.beta) # TODO
                     res[ch,i,j] = x[ch,i,j]*r
         return res

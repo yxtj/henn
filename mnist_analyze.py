@@ -21,6 +21,35 @@ def relu(x):
     return torch.relu(x)
 
 
+class CryptoNet(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv = torch.nn.Conv2d(1, 5, kernel_size=5, padding=1, stride=2)
+        self.fc1 = torch.nn.Linear(845, 100)
+        self.fc2 = torch.nn.Linear(100, 10)
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = square(x)
+        x = x.view(-1, 845)
+        x = self.fc1(x)
+        x = square(x)
+        x = self.fc2(x)
+        return x
+
+    def mid_layer(self):
+        return ['o1', 'o1a', 'o2', 'o2a', 'o3']
+    
+    def forward_analyze(self, x):
+        o1 = self.conv1(x)
+        o1a = square(o1)
+        o1a = o1a.view(-1, 256)
+        o2 = self.fc1(o1a)
+        o2a = square(o2)
+        o3 = self.fc2(o2a)
+        return o1, o1a, o2, o2a, o3
+    
+
 class Net1(torch.nn.Module):
     def __init__(self, hidden=64, output=10):
         super().__init__()        
@@ -53,8 +82,39 @@ class Net1(torch.nn.Module):
         o3 = self.fc2(o2a)
         return o1, o1a, o2, o2a, o3
 
-
 class Net2(torch.nn.Module):
+    def __init__(self, output=10):
+        super().__init__()        
+        self.conv1 = torch.nn.Conv2d(1, 4, kernel_size=5, padding=0, stride=2)
+        self.conv2 = torch.nn.Conv2d(4, 2, kernel_size=3, padding=0, stride=2)
+        self.fc1 = torch.nn.Linear(50, output)
+
+    def forward(self, x):
+        x = self.conv1(x)
+        # the model uses the square activation function
+        x = square(x)
+        x = self.conv2(x)
+        x = square(x)
+        # flattening while keeping the batch axis
+        x = x.view(-1,50)
+        x = self.fc1(x)
+        return x
+
+    def mid_layer(self):
+        return ['o1', 'o1a', 'o2', 'o2a', 'o3']
+    
+    def forward_analyze(self, x):
+        o1 = self.conv1(x)
+        # the model uses the square activation function
+        o1a = square(o1)
+        o2 = self.conv1(o1a)
+        o2a = square(o2)
+        o2a = o2a.view(-1,50)
+        o3 = self.fc1(o1a)
+        return o1, o1a, o2, o2a, o3
+
+
+class Net3(torch.nn.Module):
     def __init__(self, act=square, output=10):
         super().__init__()
         self.act = act
@@ -131,7 +191,7 @@ def main():
     model = Net1()
     #model = Net2()
     criterion = torch.nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
     train(model, train_loader, criterion, optimizer, 10)
     
     test(model, test_loader, criterion)
