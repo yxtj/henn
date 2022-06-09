@@ -355,7 +355,7 @@ class Conv2d(ENNLayer2dBase):
         cut = cut*self.weight[ch, :, wi_f:wi_l, wj_f:wj_l]
         r = heutil.hesum(cut.ravel())
         r = cut.sum()
-        if self.bias:
+        if self.bias is not None:
             r += self.bias[ch]
         return r
     
