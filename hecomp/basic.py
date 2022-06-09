@@ -28,12 +28,18 @@ def hevar(x:np.ndarray, mean=None):
     return m2 - mean*mean
 
 
-def hewsum(x:np.ndarray, w:np.ndarray):
+def hewsum(x:np.ndarray, w:np.ndarray, b=None):
     """
     Weighted summation among input data <x> and weight <w>.
     They should be two vectors of the same length
+    If <b> is not None, add it to the result as a constant bias.
     """
-    return hesum(x*w)
+    if b is None:
+        return hesum(x*w)
+    else:
+        t = np.concatenate([x*w, [b]])
+        return hesum(t)
+
 
 # %% dot product
 
