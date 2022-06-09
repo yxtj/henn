@@ -22,7 +22,7 @@ class Conv2dConf():
         if isinstance(kernel_size, int):
             kernel_size = (kernel_size, kernel_size)
         self.kernel_size = kernel_size
-        self.nelem = kernel_size[0]*kernel_size[1]
+        self.nelem = in_ch*kernel_size[0]*kernel_size[1]
         self.factor = 1.0 / self.nelem
         if isinstance(stride, int):
             stride = (stride, stride)
@@ -41,7 +41,27 @@ class Conv2dConf():
         assert weight.shape == (self.out_ch, self.in_ch_pg, *self.kernel_size)
         if bias:
             assert bias.shape == (self.out_ch)
+    
+    def comp_out_size(self, sx:int, sy:int, padded:bool=False):
+        # <padded> means whether <sx> and <sy> already considered the padding pixels
+        px = 0 if padded else 2*self.padding[0]
+        py = 0 if padded else 2*self.padding[1]
+        ox = (sx+px-self.kernel_size[0]+1) // self.stride[0]
+        oy = (sy+py-self.kernel_size[1]+1) // self.stride[1]
+        #if self.ceil_mode:
+        #    ox = int(np.ceil(ox))
+        #    oy = int(np.ceil(oy))
+        #else:
+        #    ox = int(np.floor(ox))
+        #    oy = int(np.floor(oy))
+        return ox, oy
 
+
+def conv2d(x, conf:Conv2dConf, weight, bias):
+    #return conv2d_v1(x, conf, weight, bias)
+    return conv2d_v2(x, conf, weight, bias)
+
+# %% convolution version 1
 
 def conv2d_one(x, ch, i, j, conf:Conv2dConf, weight, bias):
     _, nx, ny = x.shape
@@ -62,14 +82,14 @@ def conv2d_one(x, ch, i, j, conf:Conv2dConf, weight, bias):
     #i_l, j_l = min(nx, i_l), min(ny, j_l)
     cut = x[ch_f:ch_l, max(0, i_f):i_l, max(0, j_f):j_l]
     cut = cut*weight[ch, :, wi_f:wi_l, wj_f:wj_l]
-    r = heutil.sum_list(cut.ravel())
+    r = heutil.hesum(cut.ravel())
     r = cut.sum()
-    if bias:
+    if bias is not None:
         r += bias[ch]
     return r
-    
 
-def conv2d(x, conf:Conv2dConf, weight, bias):
+
+def conv2d_v1(x, conf:Conv2dConf, weight, bias):
     assert x.ndim == 3
     in_ch, sx, sy = x.shape
     ox, oy = conf.comp_out_size(sx, sy)
@@ -80,6 +100,88 @@ def conv2d(x, conf:Conv2dConf, weight, bias):
             #print('  i',i)
             for j in range(oy):
                 #print('    j',j)
-                out[ch,i,j] = conv2d_one(x, ch, i, j)
+                out[ch,i,j] = conv2d_one(x, ch, i, j, conf, weight, bias)
     return out
 
+
+# %% convolution version 2
+
+def pad_data(x, padding:(int,tuple), left=True, up=True, right=True, down=True):
+    if padding is None or (isinstance(padding, int) and padding==0) or \
+        (isinstance(padding, (tuple, list)) and padding[0]==0 and padding[1]==0):
+        return x
+    if isinstance(padding, int):
+        px, py = padding, padding
+    else:
+        px, py = padding
+    nc, nx, ny = x.shape
+    newx, newy = nx, ny
+    offx, offy = 0, 0
+    if left:
+        newx += px
+        offx = px
+    if up:
+        newy += py
+        offy = py
+    if right:
+        newx += px
+    if down:
+        newy += py
+    if np.issubdtype(x.dtype, np.number):
+        data = np.zero((nc, newx, newy), x.dtype)
+    else:
+        data = np.empty((nc, newx, newy), x.dtype)
+    data[:, offx:offx+nx, offy:offy+ny] = x
+    # pad 0 for HE case
+    if not np.issubdtype(x.dtype, np.number):
+        if left:
+            data[:,:px] = 0
+        if right:
+            data[:,-px:] = 0
+        if up:
+            data[:,:,:py] = 0
+        if down:
+            data[:,:,-py:] = 0
+    return data
+        
+
+def conv2d_channel(x, ch, conf:Conv2dConf, weight, bias, out=None):
+    # No padding is considered inside this function.
+    # <x> is considered already padded.
+    _, nx, ny = x.shape
+    if conf.groups != 1:
+        g = ch // conf.out_ch_pg # tell group by out-channel
+        ch_f = g * conf.in_ch_pg
+        ch_l = ch_f + conf.in_ch_pg
+        data = x[ch_f:ch_l]
+    else:
+        data = x
+    #print(g, ch_f, ch_l)
+    ksx, ksy = conf.kernel_size
+    if out is None:
+        ox, oy = conf.comp_out_size(nx, ny, True)
+        out = np.empty((1, ox, oy), x.dtype)
+    
+    oi, oj = 0, 0
+    for i in range(0, nx - ksx, conf.stride[0]):
+        oj = 0
+        for j in range(0, ny - ksy, conf.stride[1]):
+            cut = data[:, i:i+ksx, j:j+ksy]
+            o = heutil.hewsum(cut.ravel(), weight[ch].ravel(), bias[ch])
+            out[oi, oj] = o
+            oj += 1
+        oi += 1
+    return out
+
+
+def conv2d_v2(x, conf:Conv2dConf, weight, bias):
+    assert x.ndim == 3
+    in_ch, sx, sy = x.shape
+    x = pad_data(x, conf.padding)
+    ox, oy = conf.comp_out_size(sx, sy, True)
+    out = np.empty((conf.out_ch, ox, oy), x.dtype)
+    for ch in range(conf.out_ch):
+        conv2d_channel(x, ch, conf, weight, bias, out[ch])
+    #out = [conv2d_channel(x, ch, conf, weight, bias) for ch in range(conf.out_ch)]
+    #out = np.concatenate(out)
+    return out
