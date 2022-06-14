@@ -169,6 +169,8 @@ class ResNet(hennlayer.ENNLayer):
 
 # %% helper functions for generation versions of ResNet
 
+# kwargs can contain: num_classes:int, groups:int, width_per_group:int
+             
 def resnet18(**kwargs):
     return ResNet(BasicBlock, [2, 2, 2, 2], **kwargs)
 

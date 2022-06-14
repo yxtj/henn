@@ -68,6 +68,14 @@ class Identity(ENNLayer):
     def __repr__(self):
         return "Identity()"
 
+class Flatten(ENNLayer):
+    def forward(self, x):
+        # x.flatten() always returns a copy
+        return x.ravel()
+    
+    def __repr__(self):
+        return "Flatten()"
+    
 
 class ENNLayer2dBase(ENNLayer):
     def __init__(self, kernel_size, stride=1, padding=0, ceil_mode=False):
@@ -440,6 +448,8 @@ class Sequential(ENNLayer):
             x = l.forward(x)
         return x
 
+    def __getitem__(self, idx:int):
+        return self.layers[idx]
 
 # %% test
 

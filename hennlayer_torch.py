@@ -20,7 +20,7 @@ def make_linear(ref:nn.Linear):
 
 # %% convolution
 
-def make_conv2d(self, ref:nn.Conv2d):
+def make_conv2d(ref:nn.Conv2d):
     layer = hennlayer.Conv2d(ref.in_channels, ref.out_channels, ref.kernel_size,
                            ref.stride, ref.padding, ref.groups)
     layer.weight = ref.weight.data.detach().numpy()
