@@ -8,7 +8,7 @@ Function List:
     sqrt: square root of a number
 """
 from hesign import sign
-import numpy as np
+#import numpy as np
 
 # %% max with polynomial approximation
 
@@ -46,4 +46,8 @@ def sqrt(x):
     '''
     t = x-1
     return 1 + t/2 - t*t/8
+    
+
+def square(x):
+    return x*x
     
