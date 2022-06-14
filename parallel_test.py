@@ -5,7 +5,7 @@ import multiprocessing as mp
 import os, time
 
 
-def task(pid, x):
+def task(pid, x, return_dict):
     print('task-'+str(pid), os.getpid())
     t=time.time()
     res = 0
@@ -13,7 +13,9 @@ def task(pid, x):
         res += i
     t=time.time()-t
     print('task-'+str(pid), os.getpid(), t)
-    return res
+    #return res
+    return_dict[pid] = res
+
 
 class parallel_run():
     def __init__(self, n):
@@ -32,14 +34,18 @@ class parallel_run():
 
 
 if __name__ == "__main__":
-    p1=mp.Process(target=task, args=(1, 10000000,))
-    p2=mp.Process(target=task, args=(2, 10000000,))
+    manager = mp.Manager()
+    return_dict = manager.dict()
+    
+    p1=mp.Process(target=task, args=(1, 10000000, return_dict))
+    p2=mp.Process(target=task, args=(2, 10000000, return_dict))
+    print('main',os.getpid())
     t=time.time()
     p1.start()
     p2.start()
-    print("xxxx")
     p1.join()
     p2.join()
     t=time.time()-t
     print('main',os.getpid(), t)
+    print(return_dict)
     
