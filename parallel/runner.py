@@ -7,24 +7,25 @@ import os, time
 from .phendata import PhenData
 from .phennetwork import PhenNetwork
 
-class PhenRunner():
+class PhenRunnerDup():
     '''
-    Parallel Homomorphic Encrypted Deep Neural Network
+    Parallel Homomorphic Encrypted Deep Neural Network.
+    Duplicate the data on cutting edges
     '''
     def __init__(self, n_part, network):
         self.npart = n_part
-        self.wnpart, self.hnpart = self.divide_part(n_part)
+        self.hnpart, self.wnpart = self.divide_part(n_part)
         assert self.wnpart * self.hnpart == self.npart
-        self.cut_network()
         self.net = network
+        self.divide_network()
         self.parts = np.array([
             [None for i in range(self.wnpart)] for j in range(self.hnpart)])
     
     def divide_part(self, n):
         s = np.sqrt(n)
-        w = int(np.floor(s))
-        h = n // w
-        return w, h
+        h = int(np.floor(s))
+        w = n // h
+        return h, w
     
     def divide_network(self):
         pass
@@ -33,9 +34,9 @@ class PhenRunner():
         '''
         Require data to be 2D
         '''
-        w, h = data.shape # data.shape[-2:]
-        wind = np.linspace(0, w, self.wnpart, False, dtype=int)
+        h, w = data.shape # data.shape[-2:]
         hind = np.linspace(0, h, self.hnpart, False, dtype=int)
+        wind = np.linspace(0, w, self.wnpart, False, dtype=int)
         dpart = np.array([ 
             [None for i in range(self.wnpart)] for j in range(self.hnpart)])
         for i in range(self.hnpart - 1):
@@ -59,6 +60,23 @@ class PhenRunner():
             lambda ch:self.compute(x, ch, ox, oy), range(self.conv.out_ch)),
             x.dtype)
         pool.join()
+
+
+# %% 
+
+class PhenRunnerCom():
+    '''
+    Parallel Homomorphic Encrypted Deep Neural Network.
+    Workers communicate to share pixels on the cutting edge.
+    '''
+    def __init__(self, n_part, network):
+        self.npart = n_part
+        self.hnpart, self.wnpart = self.divide_part(n_part)
+        assert self.wnpart * self.hnpart == self.npart
+        self.net = network
+        self.divide_network()
+        self.parts = np.array([
+            [None for i in range(self.wnpart)] for j in range(self.hnpart)])
     
     
 # %% main
