@@ -11,8 +11,8 @@ Function List:
 
 #import numpy as np
 from .vectorize import hevectorize
-import math.sqrt
-import time.sleep
+from math import sqrt as math_sqrt
+import time
 
 # %% max
 
@@ -34,7 +34,7 @@ def relu(x):
 
 def sqrt(x):
     #return x.bootstrap_with_function(lambda x:np.sqrt(x))
-    return x.bootstrap_with_function(lambda x:math.sqrt(x))
+    return x.bootstrap_with_function(lambda x:math_sqrt(x))
 
 
 def square(x):
