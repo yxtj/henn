@@ -162,15 +162,11 @@ def conv2d_channel(x, ch, conf:Conv2dConf, weight, bias, out=None):
         ox, oy = conf.comp_out_size(nx, ny, True)
         out = np.empty((1, ox, oy), x.dtype)
     
-    oi, oj = 0, 0
-    for i in range(0, nx - ksx, conf.stride[0]):
-        oj = 0
-        for j in range(0, ny - ksy, conf.stride[1]):
+    for i in range(0, nx - ksx + 1, conf.stride[0]):
+        for j in range(0, ny - ksy + 1, conf.stride[1]):
             cut = data[:, i:i+ksx, j:j+ksy]
             o = heutil.hewsum(cut.ravel(), weight[ch].ravel(), bias[ch])
-            out[oi, oj] = o
-            oj += 1
-        oi += 1
+            out[i, j] = o
     return out
 
 
