@@ -25,8 +25,8 @@ class PhenLayer():
         self.hid = hid
         self.wid = wid
         # derivated properties
-        self.npart = nh*nw
-        self.partid = hid*nw + wid
+        self.npart = nh*nw # number of parts in total
+        self.pid = hid*nw + wid # part id (sequence id)
     
     def __call__(self, x):
         return self.forward(x)
@@ -76,16 +76,22 @@ class PhenLinear(PhenLayer):
         self.out_ch = linear.out_ch
         self.weight = linear.weight # shape: out_ch * in_ch
         self.bias = linear.bias # shape: out_ch
-        # assume: self.in_ch % self.npart == 0
-        m = self.in_ch // self.npart
-        off_f = self.partid*m
-        off_l = off_f + m
-        self.weight_slice = self.weight[off_f:off_l]
+        # local computation related
+        m = self.in_ch / self.npart
+        off_f = int(m*self.pid)
+        off_l = int(m*(self.pid+1)) if self.pid+1 != self.npart else self.in_ch
+        #print(m, off_f, off_l)
+        self.local_weight = self.weight[:, off_f:off_l]
+        self.local_bias = self.bias if self.pid == 0 else None
         
     def forward(self, x:np.ndarray):
-        #assert x.size == self.in_ch // self.npart
-        return heutil.hewsum(x, self.weight_slice, self.bias)
-    #dot_product_11(self.weight_slice, x)
+        #print(x, self.local_weight, self.local_bias)
+        #print(x.shape, self.local_weight.shape)
+        r = heutil.dot_product_21(self.local_weight, x)
+        #print(r.shape, None if self.local_bias is None else self.local_bias.shape)
+        if self.local_bias is not None:
+            r += self.local_bias
+        return r
 
     def in_shape(self):
         return (self.in_ch, )
