@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import numpy as np
-from .phennetwork import PhenNetwork
 
 class PhenDataHolder():
     def __init__(self, nh, nw, hid, wid):
@@ -24,6 +23,20 @@ class PhenDataHolder():
         part = data[h1:h2, w1:w2]
         self.part = part
         
+
+def load_data_part(data:np.ndarray, nh, nw, hid, wid, off=0):
+    '''
+    Requirement: data to be 2D
+    '''
+    assert data.ndim == 2
+    w, h = data.shape # data.shape[-2:]
+    hind = np.linspace(0, h, nh+1, True, dtype=int)
+    wind = np.linspace(0, w, nw+1, True, dtype=int)
+    h1, h2 = hind[hid], min(hind[hid+1]+off, h)
+    w1, w2 = wind[wid], min(wind[wid+1]+off, w)
+    part = data[h1:h2, w1:w2]
+    return part
+
 
 def divide_data(data:np.ndarray, nh, nw, off=0):
     '''
