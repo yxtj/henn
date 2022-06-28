@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 import hennlayer_torch as hnt
 import hecomp
-
+import computil
 
 def test_linear():
     fc_t = nn.Linear(5, 10)
@@ -67,17 +67,70 @@ def parallel_linear(nh=2, nw=2, nchin=100):
         diff.append(d)
     print(f"Conv parallel {nh}x{nw} correct:", np.all(np.abs(diff)<1e-4))
     print("  difference:",diff)
-    
 
+
+def parallel_conv(nh=2, nw=2, ks=3, stride=1, pad=0, sz=10):
+    conv_t = nn.Conv2d(2, 4, ks, stride, pad)
+    conv_h = hnt.make_conv2d(conv_t)
+    convs = [[pn.PhenConv(nh, nw, hid, wid, conv_h) for wid in range(nw)]
+          for hid in range(nh)]
+    
+    psx = sz + 2*pad
+    psy = sz + 2*pad
+    indh = np.linspace(0, psx, nh+1, dtype=int)
+    indw = np.linspace(0, psy, nw+1, dtype=int)
+    # guarantees that indh[i] is the first position with an output
+    if stride != 1:
+        for i in range(nh):
+            q, r = divmod(indh[i], stride)
+            if r != 0:
+                indh[i] = (q+1)*stride
+        for i in range(nw):
+            q, r = divmod(indw[i], stride)
+            if r != 0:
+                indw[i] = (q+1)*stride
+    
+    diff = []
+    for _ in range(10):
+        x = torch.rand((2, sz, sz))
+        ot = conv_t(x.unsqueeze(0))[0].detach().numpy()
+        oh=conv_h(x.numpy())
+        xp = computil.pad_data(x.numpy(), pad)
+        ops = np.empty((nh, nw), dtype=object)
+        for hid in range(nh):
+            for wid in range(nw):
+                conv = convs[hid][wid]
+                #h1, h2 = indh[hid], min(psx, indh[hid+1]+ks-1)
+                #w1, w2 = indw[wid], min(psy, indw[wid+1]+ks-1)
+                h1, h2 = indh[hid], min(psx, indh[hid+1]-stride+1+ks-1)
+                w1, w2 = indw[wid], min(psy, indw[wid+1]-stride+1+ks-1)
+                cut = xp[:, h1:h2, w1:w2]
+                #print(hid, wid, 'h:',h1,h2,'w:',w1,w2, 'shape:', cut.shape)
+                o = conv.forward(cut)
+                ops[hid,wid] = o
+        op = np.concatenate([np.concatenate(ops[i,:],2) for i in range(nw)], 1)
+        d = np.abs(ot-op).mean()
+        diff.append(d)
+    print(f"Conv parallel {nh}x{nw} stride-{stride}, pad-{pad}, correct:", np.all(np.abs(diff)<1e-4))
+    print("  difference:",diff)
+    
+    
 def main():
     # correctness
     #test_linear()
     #test_conv()
     
-    # parallel
-    parallel_linear(2, 2, 100)
-    parallel_linear(3, 2, 100)
-    parallel_linear(3, 3, 100)
+    # parallel linear
+    #parallel_linear(2, 2, 100)
+    #parallel_linear(3, 2, 100)
+    #parallel_linear(3, 3, 100)
+    
+    # parallel conv
+    parallel_conv(2, 2, 3, 1, 0, 9)
+    parallel_conv(2, 2, 3, 1, 0, 10)
+    parallel_conv(2, 2, 3, 1, 1, 10)
+    parallel_conv(2, 2, 3, 2, 0, 10)
+    parallel_conv(2, 2, 3, 2, 1, 10)
     
 
 if __name__ == "__main__":
