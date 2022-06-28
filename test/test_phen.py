@@ -60,7 +60,7 @@ def parallel_linear(nh=2, nw=2, nchin=100):
         for hid in range(nh):
             for wid in range(nw):
                 fc = fcs[hid][wid]
-                o = fc(xp[fc.pid])
+                o = fc.local_forward(xp[fc.pid])
                 ops.append(o)
         op = hecomp.hesum(ops)
         d = np.abs(ot-op).mean()
@@ -94,7 +94,6 @@ def parallel_conv(nh=2, nw=2, ks=3, stride=1, pad=0, sz=10):
     for _ in range(10):
         x = torch.rand((2, sz, sz))
         ot = conv_t(x.unsqueeze(0))[0].detach().numpy()
-        oh=conv_h(x.numpy())
         xp = computil.pad_data(x.numpy(), pad)
         ops = np.empty((nh, nw), dtype=object)
         for hid in range(nh):
@@ -106,7 +105,7 @@ def parallel_conv(nh=2, nw=2, ks=3, stride=1, pad=0, sz=10):
                 w1, w2 = indw[wid], min(psy, indw[wid+1]-stride+1+ks-1)
                 cut = xp[:, h1:h2, w1:w2]
                 #print(hid, wid, 'h:',h1,h2,'w:',w1,w2, 'shape:', cut.shape)
-                o = conv.forward(cut)
+                o = conv.local_forward(cut)
                 ops[hid,wid] = o
         op = np.concatenate([np.concatenate(ops[i,:],2) for i in range(nw)], 1)
         d = np.abs(ot-op).mean()

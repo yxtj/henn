@@ -29,11 +29,20 @@ class PhenLayer():
         self.pid = hid*nw + wid # part id (sequence id)
     
     def __call__(self, x):
-        return self.forward(x)
+        return self.local_forward(x)
     
-    def forward(self, x):
+    def local_prepare(self, x):
+        pass
+    
+    def local_forward(self, x):
         raise NotImplementedError("This function is not implemented")
-        
+    
+    def local_join(self, xmat):
+        pass
+    
+    def global_join(self, xmat):
+        pass
+    
     def in_shape(self):
         """
         Get the expected shape of input data, as a tuple.
@@ -57,7 +66,7 @@ class PhenConv(PhenLayer):
         self.weight = conv.weight
         self.bias = conv.bias
     
-    def forward(self, x:np.ndarray):
+    def local_forward(self, x:np.ndarray):
         return computil.conv2d(x, self.conf, self.weight, self.bias, False)
     
     def in_shape(self):
@@ -84,7 +93,7 @@ class PhenLinear(PhenLayer):
         self.local_weight = self.weight[:, off_f:off_l]
         self.local_bias = self.bias if self.pid == 0 else None
         
-    def forward(self, x:np.ndarray):
+    def local_forward(self, x:np.ndarray):
         #print(x, self.local_weight, self.local_bias)
         #print(x.shape, self.local_weight.shape)
         r = heutil.dot_product_21(self.local_weight, x)
@@ -108,7 +117,7 @@ class PhenFlatten(PhenLayer):
         assert ishape.ndim == 3
         dch, dw, dh = ishape
             
-    def forward(self, x:np.ndarray):
+    def local_forward(self, x:np.ndarray):
         return x.reshape((-1))
 
     def in_shape(self):
@@ -119,11 +128,13 @@ class PhenFlatten(PhenLayer):
         return (None, )
 
 
+# %% activation layers
+
 class PhenRelu(PhenLayer):
     def __init__(self, nh, nw, hid, wid):
         super().__init__(nh, nw, hid, wid)
     
-    def forward(self, x:np.ndarray):
+    def local_forward(self, x:np.ndarray):
         if x.dtype is not object:
             out = np.maximum(x, 0)
         else:
@@ -142,7 +153,7 @@ class PhenSquare(PhenLayer):
     def __init__(self, nh, nw, hid, wid):
         super().__init__(nh, nw, hid, wid)
     
-    def forward(self, x:np.ndarray):
+    def local_forward(self, x:np.ndarray):
         if x.dtype is not object:
             out = x*x
         else:
@@ -157,17 +168,4 @@ class PhenSquare(PhenLayer):
         return inshape
     
 
-# %% test
-
-
-def __test__():
-    import hennlayer_torch as ht
-    import torch
-    import mnist_analyze
-    
-    model = mnist_analyze.Net2()
-    model.load_state_dict(torch.load("pretrained/net2.pth"))
-    
-        
-    
     
