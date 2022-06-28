@@ -46,8 +46,8 @@ class Conv2dConf():
         # <padded> means whether <sx> and <sy> already considered the padding pixels
         px = 0 if padded else 2*self.padding[0]
         py = 0 if padded else 2*self.padding[1]
-        ox = (sx+px-self.kernel_size[0]+1) // self.stride[0]
-        oy = (sy+py-self.kernel_size[1]+1) // self.stride[1]
+        ox = (sx+px-self.kernel_size[0]) // self.stride[0] + 1
+        oy = (sy+py-self.kernel_size[1]) // self.stride[1] + 1
         #if self.ceil_mode:
         #    ox = int(np.ceil(ox))
         #    oy = int(np.ceil(oy))
@@ -57,9 +57,9 @@ class Conv2dConf():
         return ox, oy
 
 
-def conv2d(x, conf:Conv2dConf, weight, bias):
+def conv2d(x, conf:Conv2dConf, weight, bias, doPad=True):
     #return conv2d_v1(x, conf, weight, bias)
-    return conv2d_v2(x, conf, weight, bias)
+    return conv2d_v2(x, conf, weight, bias, doPad)
 
 # %% convolution version 1
 
@@ -128,7 +128,7 @@ def pad_data(x, padding:(int,tuple), left=True, up=True, right=True, down=True):
     if down:
         newy += py
     if np.issubdtype(x.dtype, np.number):
-        data = np.zero((nc, newx, newy), x.dtype)
+        data = np.zeros((nc, newx, newy), x.dtype)
     else:
         data = np.empty((nc, newx, newy), x.dtype)
     data[:, offx:offx+nx, offy:offy+ny] = x
@@ -162,19 +162,25 @@ def conv2d_channel(x, ch, conf:Conv2dConf, weight, bias, out=None):
         ox, oy = conf.comp_out_size(nx, ny, True)
         out = np.empty((1, ox, oy), x.dtype)
     
+    oi, oj = 0, 0
     for i in range(0, nx - ksx + 1, conf.stride[0]):
+        oj = 0
         for j in range(0, ny - ksy + 1, conf.stride[1]):
             cut = data[:, i:i+ksx, j:j+ksy]
             o = heutil.hewsum(cut.ravel(), weight[ch].ravel(), bias[ch])
-            out[i, j] = o
+            out[oi, oj] = o
+            oj += 1
+        oi += 1
     return out
 
 
-def conv2d_v2(x, conf:Conv2dConf, weight, bias):
+def conv2d_v2(x, conf:Conv2dConf, weight, bias, doPad=True):
     assert x.ndim == 3
     in_ch, sx, sy = x.shape
-    x = pad_data(x, conf.padding)
+    if doPad:
+        x = pad_data(x, conf.padding)
     ox, oy = conf.comp_out_size(sx, sy, True)
+    #print(conf.out_ch, ox, oy, sx, sy)
     out = np.empty((conf.out_ch, ox, oy), x.dtype)
     for ch in range(conf.out_ch):
         conv2d_channel(x, ch, conf, weight, bias, out[ch])
