@@ -58,7 +58,7 @@ class PhenConv(PhenLayer):
         self.bias = conv.bias
     
     def forward(self, x:np.ndarray):
-        return computil.conv2d(x, self.conf, self.weight, self.bias)
+        return computil.conv2d(x, self.conf, self.weight, self.bias, False)
     
     def in_shape(self):
         return (self.in_ch, None, None)
