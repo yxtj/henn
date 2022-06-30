@@ -5,16 +5,6 @@ import hennlayer
 import computil
 import heutil
 
-class PhenNetwork():
-    def __init__(self, nh, nw, hid, wid):
-        self.nh = nh
-        self.nw = nw
-        self.hid = hid
-        self.wid = wid
-        
-    def forward(self, data:np.ndarray):
-        pass
-    
     
 # %% layers
 
@@ -31,7 +21,7 @@ class PhenLayer():
     def __call__(self, x:np.ndarray):
         return self.local_forward(x)
     
-    def cross_request(self):
+    def cross_request(self, x:np.ndarray):
         """
         Get list of (hid, wid, desc) for data dependency.
         The type and content of <desc> is determined by each layer.
@@ -68,7 +58,7 @@ class PhenLayer():
     
     def global_join(self, xmat):
         """
-        Merge data of all parts and return the final result.
+        Merge local results of all parts and return the global result.
         Return the final result of this layer as if there is no parallelization.
         """
         raise NotImplementedError("The global_join function is not implemented")
@@ -87,7 +77,15 @@ class PhenLayer():
         """
         raise NotImplementedError("This function is not implemented")
     
-# %% computational layer
+# %% convolution layer
+
+# TODO: balance data after one conv
+# e.g. conv with kernel size 3 for 0-5, with 2 workers:
+# input cut: [0, 1, 2], [3, 4, 5]
+# fill dependent: [0, 1, 2, 3, 4], [3, 4, 5]
+# output: [0, 1, 2], [3]
+# inbalance we need to move 2 to worker-2
+# expected input for next conv; [0, 1], [2, 3]
 
 class PhenConv(PhenLayer):
     def __init__(self, nh, nw, hid, wid, conv:hennlayer.Conv2d):
@@ -96,34 +94,40 @@ class PhenConv(PhenLayer):
                                         conv.stride, conv.padding, conv.groups)
         self.weight = conv.weight
         self.bias = conv.bias
-        self.cutter = None
     
-    def cross_request(self):
+    def cross_request(self, x:np.ndarray):
         res = []
+        _, h, w = x.shape
+        hneed = self.conf.kernel_size[0] - self.conf.stride[0]
+        wneed = self.conf.kernel_size[1] - self.conf.stride[1]
         if self.wid != self.nw-1:
             # right
-            res.append((self.hid, self.wid + 1, None))
+            if hneed != 0:
+                res.append((self.hid, self.wid + 1, (h, wneed)))
         if self.hid != self.nh-1:
             # lower
-            res.append((self.hid + 1, self.wid, None))
+            if wneed != 0:
+                res.append((self.hid + 1, self.wid, (hneed, w)))
         if self.hid != self.nh-1 and self.wid != self.nw-1:
             # lower right
-            res.append((self.hid + 1, self.wid + 1, None))
+            if hneed != 0 and wneed != 0:
+                res.append((self.hid + 1, self.wid + 1, (hneed, wneed)))
         return res
     
-    def cross_message(self, x:np.ndarray, tgt_hid:int, tgt_wid:int, desc):
+    def cross_message(self, x:np.ndarray, tgt_hid:int, tgt_wid:int, desc:tuple):
         assert 0 <= tgt_hid < self.nh and tgt_hid != self.hid
         assert 0 <= tgt_wid < self.nw and tgt_wid != self.wid
-        ks1, ks2 = self.conf.kernel_size
         if tgt_hid == self.hid-1 and tgt_wid == self.wid-1:
             # upper left
-            return (tgt_hid, tgt_wid, x[:, :ks1, :ks2])
+            return (tgt_hid, tgt_wid, x[:, :desc[0], :desc[1]])
         elif tgt_hid == self.hid and tgt_wid == self.wid-1:
             # left
-            return (tgt_hid, tgt_wid, x[:, :, :ks2])
+            assert desc[0] == x.shape[1]
+            return (tgt_hid, tgt_wid, x[:, :, :desc[1]])
         elif tgt_hid == self.hid-1 and tgt_wid == self.wid:
             # upper
-            return (tgt_hid, tgt_wid, x[:, :ks1, :])
+            assert desc[1] == x.shape[2]
+            return (tgt_hid, tgt_wid, x[:, :desc[0], :])
         return None
     
     def local_merge(self, xlocal:np.ndarray, xlist:list):
@@ -166,6 +170,7 @@ class PhenConv(PhenLayer):
         ox, oy = self.conf.comp_out_size(inshape[1], inshape[2])
         return (self.conf.out_ch, ox, oy)
 
+# %% fully connected layer
 
 class PhenLinear(PhenLayer):
     def __init__(self, nh, nw, hid, wid, linear:hennlayer.Linear):
@@ -175,19 +180,26 @@ class PhenLinear(PhenLayer):
         self.weight = linear.weight # shape: out_ch * in_ch
         self.bias = linear.bias # shape: out_ch
         # local computation related
-        m = self.in_ch / self.npart
-        off_f = int(m*self.pid)
-        off_l = int(m*(self.pid+1)) if self.pid+1 != self.npart else self.in_ch
-        #print(m, off_f, off_l)
-        self.local_weight = self.weight[:, off_f:off_l]
-        self.local_bias = self.bias if self.pid == 0 else None
-        
+        #m = self.in_ch / self.npart
+        #off_f = int(m*self.pid)
+        #off_l = int(m*(self.pid+1)) if self.pid+1 != self.npart else self.in_ch
+        #self.local_weight = self.weight[:, off_f:off_l]
+        #self.local_bias = self.bias if self.pid == 0 else None
+        self.local_weight = self.weight[:, self.pid::self.npart]
+        self.local_bias = np.zeros((self.out_ch))
+        self.local_bias[self.pid::self.npart] = self.bias[self.pid::self.npart]
+    
+    def cross_request(self, x:np.ndarray):
+        return []
+    
+    def cross_message(self, x:np.ndarray, tgt_hid:int, tgt_wid:int, desc):
+        return (self.hid, self.wid, x)
+    
+    def local_merge(self, xlocal:np.ndarray, xlist:list):
+        return xlocal
+    
     def local_prepare(self, x:np.ndarray):
-        if self.conf.padding == 0:
-            return x
-        res = computil.pad_data(x, self.padding, self.wid==0, self.hid==0,
-                                self.wid==self.nw-1, self.hid==self.nh-1)
-        return res
+        return x
     
     def local_forward(self, x:np.ndarray):
         #print(x, self.local_weight, self.local_bias)
@@ -198,11 +210,13 @@ class PhenLinear(PhenLayer):
             r += self.local_bias
         return r
     
-    def local_join(self, xlocal, xdict):
-        pass
-    
     def global_join(self, xmat):
-        pass
+        xlist = xmat.ravel()
+        #assert len(xlist) == self.npart
+        out = np.empty(self.out_ch, xlist[0].dtype)
+        for i in range(len(xlist)):
+            out[i::self.npart] = xlist[i]
+        return out
 
     def in_shape(self):
         return (self.in_ch, )
@@ -210,7 +224,9 @@ class PhenLinear(PhenLayer):
     def out_shape(self, inshape:tuple):
         assert len(inshape) == 1
         return (self.out_ch, )
-        
+
+
+# %% flatten layer
 
 class PhenFlatten(PhenLayer):
     def __init__(self, nh, nw, hid, wid, ishape):

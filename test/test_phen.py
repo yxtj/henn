@@ -44,28 +44,30 @@ def test_conv():
     print("  difference:",diff)
     
     
-def parallel_linear(nh=2, nw=2, nchin=100):
-    fc_t = nn.Linear(nchin, 10)
+def parallel_linear(nh=2, nw=2, nchin=100, nchout=10):
+    fc_t = nn.Linear(nchin, nchout)
     fc_h = hnt.make_linear(fc_t)
     fcs = [[pn.PhenLinear(nh, nw, hid, wid, fc_h) for wid in range(nw)]
           for hid in range(nh)]
-    ind = np.linspace(0, nchin, nh*nw+1, dtype=int)
+    #ind = np.linspace(0, nchin, nh*nw+1, dtype=int)
     
     diff = []
     for _ in range(10):
         x = torch.rand((nchin))
         ot = fc_t(x.unsqueeze(0)).detach().numpy()
-        xp = [x[ind[i]:ind[i+1]] for i in range(nh*nw)]
+        xp = x.numpy()
         ops = []
         for hid in range(nh):
             for wid in range(nw):
                 fc = fcs[hid][wid]
-                o = fc.local_forward(xp[fc.pid])
+                #cut = xp[ind[fc.pid]:ind[fc.pid+1]]
+                cut = xp[fc.pid::fc.npart]
+                o = fc.local_forward(cut)
                 ops.append(o)
         op = hecomp.hesum(ops)
         d = np.abs(ot-op).mean()
         diff.append(d)
-    print(f"Conv parallel {nh}x{nw} correct:", np.all(np.abs(diff)<1e-4))
+    print(f"Parallel {nh}x{nw}: linear correct:", np.all(np.abs(diff)<1e-4))
     print("  difference:",diff)
 
 
@@ -110,7 +112,7 @@ def parallel_conv(nh=2, nw=2, ks=3, stride=1, pad=0, sz=10):
         op = np.concatenate([np.concatenate(ops[i,:],2) for i in range(nw)], 1)
         d = np.abs(ot-op).mean()
         diff.append(d)
-    print(f"Conv parallel {nh}x{nw} stride-{stride}, pad-{pad}, correct:", np.all(np.abs(diff)<1e-4))
+    print(f"Parallel {nh}x{nw}: Conv kernel-{ks}, stride-{stride}, pad-{pad}, correct:", np.all(np.abs(diff)<1e-4))
     print("  difference:",diff)
     
     
@@ -120,16 +122,16 @@ def main():
     #test_conv()
     
     # parallel linear
-    #parallel_linear(2, 2, 100)
-    #parallel_linear(3, 2, 100)
-    #parallel_linear(3, 3, 100)
+    parallel_linear(2, 2, 100, 10)
+    parallel_linear(3, 2, 100, 10)
+    parallel_linear(3, 3, 100, 10)
     
     # parallel conv
-    parallel_conv(2, 2, 3, 1, 0, 9)
-    parallel_conv(2, 2, 3, 1, 0, 10)
-    parallel_conv(2, 2, 3, 1, 1, 10)
-    parallel_conv(2, 2, 3, 2, 0, 10)
-    parallel_conv(2, 2, 3, 2, 1, 10)
+    #parallel_conv(2, 2, 3, 1, 0, 9)
+    #parallel_conv(2, 2, 3, 1, 0, 10)
+    #arallel_conv(2, 2, 3, 1, 1, 10)
+    #parallel_conv(2, 2, 3, 2, 0, 10)
+    #parallel_conv(2, 2, 3, 2, 1, 10)
     
 
 if __name__ == "__main__":
