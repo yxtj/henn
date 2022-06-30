@@ -28,24 +28,54 @@ class PhenLayer():
         self.npart = nh*nw # number of parts in total
         self.pid = hid*nw + wid # part id (sequence id)
     
-    def __call__(self, x):
+    def __call__(self, x:np.ndarray):
         return self.local_forward(x)
     
-    def local_prepare(self, x):
-        pass
+    def cross_request(self):
+        """
+        Get list of (hid, wid, desc) for data dependency.
+        The type and content of <desc> is determined by each layer.
+        """
+        return []
     
-    def local_forward(self, x):
-        raise NotImplementedError("This function is not implemented")
+    def cross_message(self, x:np.ndarray, tgt_hid:int, tgt_wid:int, desc):
+        """
+        Return the data requested by another part.
+        This function respond to the cross_request() function.
+        """
+        return (self.hid, self.wid, x)
     
-    def local_join(self, xmat):
-        pass
+    def local_merge(self, xlocal:np.ndarray, xlist:list):
+        """
+        Merge the local data and dependent data (get by cross_message) for processing.
+        The xlist is a list storing the results of cross_message() from other parts.
+        """
+        return xlocal
+    
+    def local_prepare(self, x:np.ndarray):
+        """
+        Preprocessing of the input data.
+        The output of this function is feed to the local_forward() function.
+        """
+        return x
+    
+    def local_forward(self, x:np.ndarray):
+        """
+        The main function of processing local part.
+        Return the local processing reuslt.
+        """
+        raise NotImplementedError("The local_forward function is not implemented")
     
     def global_join(self, xmat):
-        pass
+        """
+        Merge data of all parts and return the final result.
+        Return the final result of this layer as if there is no parallelization.
+        """
+        raise NotImplementedError("The global_join function is not implemented")
     
     def in_shape(self):
         """
-        Get the expected shape of input data, as a tuple.
+        Get the expected shape of global input data, as a tuple.
         For unfixed input: return None.
         For dimensions with unfixed size: return None on that dimension.
         """
@@ -53,10 +83,11 @@ class PhenLayer():
         
     def out_shape(self, inshape:tuple):
         """
-        Get the expected shape of output data, as a tuple, given data as <inshape>.
+        Get the expected shape of global output data, as a tuple, given data as <inshape>.
         """
         raise NotImplementedError("This function is not implemented")
     
+# %% computational layer
 
 class PhenConv(PhenLayer):
     def __init__(self, nh, nw, hid, wid, conv:hennlayer.Conv2d):
@@ -65,17 +96,75 @@ class PhenConv(PhenLayer):
                                         conv.stride, conv.padding, conv.groups)
         self.weight = conv.weight
         self.bias = conv.bias
+        self.cutter = None
+    
+    def cross_request(self):
+        res = []
+        if self.wid != self.nw-1:
+            # right
+            res.append((self.hid, self.wid + 1, None))
+        if self.hid != self.nh-1:
+            # lower
+            res.append((self.hid + 1, self.wid, None))
+        if self.hid != self.nh-1 and self.wid != self.nw-1:
+            # lower right
+            res.append((self.hid + 1, self.wid + 1, None))
+        return res
+    
+    def cross_message(self, x:np.ndarray, tgt_hid:int, tgt_wid:int, desc):
+        assert 0 <= tgt_hid < self.nh and tgt_hid != self.hid
+        assert 0 <= tgt_wid < self.nw and tgt_wid != self.wid
+        ks1, ks2 = self.conf.kernel_size
+        if tgt_hid == self.hid-1 and tgt_wid == self.wid-1:
+            # upper left
+            return (tgt_hid, tgt_wid, x[:, :ks1, :ks2])
+        elif tgt_hid == self.hid and tgt_wid == self.wid-1:
+            # left
+            return (tgt_hid, tgt_wid, x[:, :, :ks2])
+        elif tgt_hid == self.hid-1 and tgt_wid == self.wid:
+            # upper
+            return (tgt_hid, tgt_wid, x[:, :ks1, :])
+        return None
+    
+    def local_merge(self, xlocal:np.ndarray, xlist:list):
+        h = 2 if self.hid != self.nh-1 else 1
+        w = 2 if self.wid != self.nw-1 else 1
+        xmat = np.empty((h, w), dtype=np.ndarray)
+        xmat[0][0] = xlocal
+        for hid, wid, xr in xlist:
+            offh = hid - self.hid
+            offw = wid - self.wid
+            xmat[offh, offw] = xr
+        xmat = np.ndarray(xmat) # turn into 3D
+        res = np.concatenate(
+            [ np.concatenate(xmat[i,:],2) for i in range(self.nw) ], 1)
+        return res
+    
+    def local_prepare(self, x:np.ndarray):
+        if self.conf.padding == 0:
+            return x
+        res = computil.pad_data(x, self.padding, self.wid==0, self.hid==0,
+                                self.wid==self.nw-1, self.hid==self.nh-1)
+        return res
     
     def local_forward(self, x:np.ndarray):
         return computil.conv2d(x, self.conf, self.weight, self.bias, False)
+    
+    def global_join(self, xmat):
+        xmat = np.ndarray(xmat)
+        assert xmat.shape == (self.nh, self.nw, self.conf.out_ch)
+        res = np.concatenate(
+            [ np.concatenate(xmat[i,:],2) for i in range(self.nw) ], 1)
+        return res
     
     def in_shape(self):
         return (self.in_ch, None, None)
     
     def out_shape(self, inshape:tuple):
         assert len(inshape) == 3
-        assert inshape[0] == self.conf.out_ch
-        return self.conf.comp_out_size(inshape[1], inshape[2])
+        assert inshape[0] == self.conf.in_ch
+        ox, oy = self.conf.comp_out_size(inshape[1], inshape[2])
+        return (self.conf.out_ch, ox, oy)
 
 
 class PhenLinear(PhenLayer):
@@ -93,6 +182,13 @@ class PhenLinear(PhenLayer):
         self.local_weight = self.weight[:, off_f:off_l]
         self.local_bias = self.bias if self.pid == 0 else None
         
+    def local_prepare(self, x:np.ndarray):
+        if self.conf.padding == 0:
+            return x
+        res = computil.pad_data(x, self.padding, self.wid==0, self.hid==0,
+                                self.wid==self.nw-1, self.hid==self.nh-1)
+        return res
+    
     def local_forward(self, x:np.ndarray):
         #print(x, self.local_weight, self.local_bias)
         #print(x.shape, self.local_weight.shape)
@@ -101,6 +197,12 @@ class PhenLinear(PhenLayer):
         if self.local_bias is not None:
             r += self.local_bias
         return r
+    
+    def local_join(self, xlocal, xdict):
+        pass
+    
+    def global_join(self, xmat):
+        pass
 
     def in_shape(self):
         return (self.in_ch, )
