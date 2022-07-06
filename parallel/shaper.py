@@ -22,6 +22,9 @@ class Shaper:
     def get_index(self, hid, wid):
         raise NotImplementedError("method get_index is not implemented")
 
+    def get_indexes(self, hid, wid):
+        raise NotImplementedError("method get_indexes is not implemented")
+
 
 def make_shaper(nh:int, nw:int, dim:int, data_shape:tuple, **kwargs):
     assert isinstance(data_shape, tuple)
@@ -62,6 +65,10 @@ class Shaper1D_consecutive(Shaper):
 
     def get_index(self, hid, wid):
         sid = hid*self.nw + wid
+        return self.ind[sid]
+
+    def get_indexes(self, hid, wid):
+        sid = hid*self.nw + wid
         i1, i2 = self.ind[sid], self.ind[sid+1]
         return np.arange(i1, i2)
 
@@ -87,6 +94,10 @@ class Shaper1D_interleave(Shaper):
         return data[..., sid::self.npart]
 
     def get_index(self, hid, wid):
+        sid = hid*self.nw + wid
+        return self.ind[sid]
+
+    def get_indexes(self, hid, wid):
         sid = hid*self.nw + wid
         return np.arange(sid, self.n, self.npart)
 
@@ -119,6 +130,9 @@ class Shaper2D(Shaper):
         return data[..., h1:h2, w1:w2]
 
     def get_index(self, hid, wid):
+        return (self.indh[hid], self.indw[wid])
+
+    def get_indexes(self, hid, wid):
         h1, h2, w1, w2 = self.get_meta(hid, wid)
         h = h2 - h1
         w = w2 - w1
