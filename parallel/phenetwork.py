@@ -256,6 +256,12 @@ class PhenConv(PhenLayer):
     def local_forward(self, x:np.ndarray):
         return computil.conv2d(x, self.conf, self.weight, self.bias, False)
 
+    def balance_out(self, x:np.ndarray):
+        return []
+
+    def balance_in(self, x:np.ndarray):
+        return []
+
     def balance_message(self, x:np.ndarray, tgt_hid, tgt_wid):
         desc = None
         return (tgt_hid, tgt_wid, x, desc)
@@ -289,14 +295,12 @@ class PhenLinear(PhenLayer):
         self.weight = linear.weight # shape: out_ch * in_ch
         self.bias = linear.bias # shape: out_ch
         # local computation related
-        ishaper = make_shaper(self.nh, self.nw, 1, self.in_ch, interleave=True)
+        ishaper = make_shaper(self.nh, self.nw, 1, (self.in_ch,), interleave=True)
         self.ishaper = ishaper
-        oshaper = make_shaper(self.nh, self.nw, 1, self.out_ch, interleave=True)
-        self.oshaper = oshaper
         # set local weight:
         #   assume the previous layer is also a Linear layer
         #self.local_weight = self.weight[:, self.pid::self.npart]
-        self.local_weight = self.shaper.pick_data(hid, wid, self.weight)
+        self.local_weight = self.ishaper.pick_data(hid, wid, self.weight)
         # set local bias:
         #   the pid-th part handles the pid-th channel's bias
         self.local_bias = np.zeros((self.out_ch))
