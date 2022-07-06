@@ -24,9 +24,10 @@ class PhenLayer():
     def name(self):
         return self.name
 
-    def bind_in_model(self, shaper:Shaper, idx:int,
-                      gshapes:list[tuple], layer_names:list[str]):
-        self.shaper = shaper
+    def bind_in_model(self, ishaper:Shaper, oshaper:Shaper,
+                      idx:int, gshapes:list[tuple], layer_names:list[str]):
+        self.ishaper = ishaper
+        self.oshaper = oshaper
         self.layer_idx = idx
         self.gshapes = gshapes
         self.layers = layer_names
@@ -144,10 +145,10 @@ class PhenLayer():
         raise NotImplementedError("This function is not implemented")
 
     def in_shape_local(self):
-        self.shaper.get_shape(self.hid, self.wid)
+        self.ishaper.get_shape(self.hid, self.wid)
 
     def out_shape_local(self):
-        pass
+        self.oshaper.get_shape(self.hid, self.wid)
 
     # helper function
 
@@ -172,10 +173,11 @@ class PhenConv(PhenLayer):
         self.weight = conv.weight
         self.bias = conv.bias
 
-    def bind_in_model(self, shaper:Shaper, idx:int,
-                      gshapes:list[tuple], layer_names:list[str]):
-        shaper = make_shaper(self.nh, self.nw, 2, gshapes[idx])
-        super().bind_in_model(shaper, idx, gshapes, layer_names)
+    def bind_in_model(self, ishaper:Shaper, oshaper:Shaper,
+                      idx:int, gshapes:list[tuple], layer_names:list[str]):
+        ishaper = make_shaper(self.nh, self.nw, 2, gshapes[idx])
+        oshaper = make_shaper(self.nh, self.nw, 2, gshapes[idx+1])
+        super().bind_in_model(ishaper, oshaper, idx, gshapes, layer_names)
 
     def depend_out(self, x:np.ndarray):
         res = []
@@ -287,34 +289,32 @@ class PhenLinear(PhenLayer):
         self.weight = linear.weight # shape: out_ch * in_ch
         self.bias = linear.bias # shape: out_ch
         # local computation related
-        #m = self.in_ch / self.npart
-        #off_f = int(m*self.pid)
-        #off_l = int(m*(self.pid+1)) if self.pid+1 != self.npart else self.in_ch
-        #self.local_weight = self.weight[:, off_f:off_l]
-        #self.local_bias = self.bias if self.pid == 0 else None
-        self.local_weight = self.weight[:, self.pid::self.npart]
+        ishaper = make_shaper(self.nh, self.nw, 1, self.in_ch, interleave=True)
+        self.ishaper = ishaper
+        oshaper = make_shaper(self.nh, self.nw, 1, self.out_ch, interleave=True)
+        self.oshaper = oshaper
+        # set local weight:
+        #   assume the previous layer is also a Linear layer
+        #self.local_weight = self.weight[:, self.pid::self.npart]
+        self.local_weight = self.shaper.pick_data(hid, wid, self.weight)
+        # set local bias:
+        #   the pid-th part handles the pid-th channel's bias
         self.local_bias = np.zeros((self.out_ch))
         self.local_bias[self.pid::self.npart] = self.bias[self.pid::self.npart]
 
-    def bind_in_model(self, shaper:Shaper, idx:int,
-                      gshapes:list[tuple], layer_names:list[str]):
-        shaper = make_shaper(self.nh, self.nw, 1, gshapes[idx], interleave=True)
-        super().bind_in_model(shaper, idx, gshapes, layer_names)
-        # find last morphing layer (linear, conv)
+    def bind_in_model(self, ishaper:Shaper, oshaper:Shaper,
+                      idx:int, gshapes:list[tuple], layer_names:list[str]):
+        super().bind_in_model(self.ishaper, oshaper, idx, gshapes, layer_names)
+        # find last non-trivial layer
         last_idx = idx - 1
-        while last_idx >= 0 and layer_names[last_idx] not in ["linear", "conv"]:
+        while last_idx >= 0 and layer_names[last_idx] in ["flatten", "identity"]:
             last_idx -= 1
-        # bind local weights
-        if idx != 0 and last_idx >= 0 and len(gshapes[last_idx]) == 3:
-            pshaper = make_shaper(self.nh, self.nw, 2, gshapes[last_idx])
-            w = self.weight.ravel()
+        # update the local weights for Conv Layer
+        if idx != 0 and last_idx >= 0 and layer_names[last_idx] == "conv":
+            #assert len(gshapes[last_idx]) == 3
+            pshaper = make_shaper(self.nh, self.nw, 2, gshapes[last_idx+1])
+            w = self.weight.reshape((self.out_ch, -1))
             self.local_weight = pshaper.pick_data(self.hid, self.wid, w)
-        else:
-            lw = self.shaper.pick_data(self.hid, self.wid, )
-            self.local_weight = lw
-        self.local_bias = np.zeros((self.out_ch))
-        self.local_bias[self.pid::self.npart] = self.bias[self.pid::self.npart]
-
 
     def depend_to(self, x:np.ndarray):
         return []
