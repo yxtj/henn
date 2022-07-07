@@ -7,7 +7,7 @@ class PhenDataHolder():
         self.nw = nw
         self.hid = hid
         self.wid = wid        
-        self.sid = hid*nw + wid # sequence id
+        self.pid = hid*nw + wid # sequence id
         self.part = None    
     
     def load_part(self, data:np.ndarray, off=0):
