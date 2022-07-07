@@ -10,6 +10,10 @@ class Shaper:
         self.npart = nh * nw
         self.dshape = data_shape
 
+    def __eq__(self, other):
+        return type(self) == type(other) and \
+            (self.nh,self.nw,self.dshape) == (other.nh,other.nw,other.dshape)
+
     def get_shape(self, hid, wid):
         raise NotImplementedError("method get_shape is not implemented")
 
@@ -19,8 +23,8 @@ class Shaper:
     def pick_data(self, hid, wid, data:np.ndarray):
         raise NotImplementedError("method pick_data is not implemented")
 
-    def get_index(self, hid, wid):
-        raise NotImplementedError("method get_index is not implemented")
+    def get_offset(self, hid, wid):
+        raise NotImplementedError("method get_offset is not implemented")
 
     def get_indexes(self, hid, wid):
         raise NotImplementedError("method get_indexes is not implemented")
@@ -63,7 +67,7 @@ class Shaper1D_consecutive(Shaper):
         i1, i2 = self.ind[sid], self.ind[sid+1]
         return data[..., i1:i2]
 
-    def get_index(self, hid, wid):
+    def get_offset(self, hid, wid):
         sid = hid*self.nw + wid
         return self.ind[sid]
 
@@ -93,7 +97,7 @@ class Shaper1D_interleave(Shaper):
         sid = hid*self.nw + wid
         return data[..., sid::self.npart]
 
-    def get_index(self, hid, wid):
+    def get_offset(self, hid, wid):
         sid = hid*self.nw + wid
         return self.ind[sid]
 
@@ -129,7 +133,7 @@ class Shaper2D(Shaper):
         h1, h2, w1, w2 = self.get_meta(hid, wid)
         return data[..., h1:h2, w1:w2]
 
-    def get_index(self, hid, wid):
+    def get_offset(self, hid, wid):
         return (self.indh[hid], self.indw[wid])
 
     def get_indexes(self, hid, wid):
