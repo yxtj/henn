@@ -118,7 +118,7 @@ class PhenLayer():
         Merge local results of all parts and return the global result.
         Return the final result of this layer as if there is no parallelization.
         """
-        raise NotImplementedError("The global_join function is not implemented")
+        raise NotImplementedError("The global_result function is not implemented")
 
     # shape related
 
@@ -270,7 +270,7 @@ class PhenConv(PhenLayer):
     def join_merge(self, xlocal:np.ndarray, xlist:list):
         raise NotImplementedError("The join_merge function is not implemented")
 
-    def global_join(self, xmat):
+    def global_result(self, xmat):
         xmat = np.ndarray(xmat)
         assert xmat.shape == (self.nh, self.nw, self.conf.out_ch)
         res = np.concatenate(
@@ -332,7 +332,7 @@ class PhenLinear(PhenLayer):
             r += self.local_bias
         return r
 
-    def global_join(self, xmat):
+    def global_result(self, xmat):
         xlist = xmat.ravel()
         #assert len(xlist) == self.npart
         out = np.empty(self.out_ch, xlist[0].dtype)
@@ -366,7 +366,7 @@ class PhenFlatten(PhenLayer):
         return (o, )
 
 
-# %%
+# %% identity layer
 
 class PhenIdentity(PhenLayer):
     def __init__(self, nh, nw, hid, wid):
