@@ -35,7 +35,7 @@ class PhenLayer():
     def __call__(self, x:np.ndarray):
         return self.local_forward(x)
 
-    # workflow: depend -> local_prepare -> local_forward -> balance
+    # workflow: depend -> local_forward -> join
 
     # data dependency
 
@@ -71,13 +71,6 @@ class PhenLayer():
 
     # local computation
 
-    def local_prepare(self, x:np.ndarray):
-        """
-        Preprocessing of the input data.
-        The output of this function is feed to the local_forward() function.
-        """
-        return x
-
     def local_forward(self, x:np.ndarray):
         """
         The main function of processing local part.
@@ -85,42 +78,42 @@ class PhenLayer():
         """
         raise NotImplementedError("The local_forward function is not implemented")
 
-    # load balance
+    # join the local computation.
+    # involve: merge partial results, repartition for load-balance
 
-    def balance_out(self):
+    def join_out(self):
         """
         Get list of (hid, wid) for parts whose data is partly hold by this part.
         i.e. Return the parts to which this part SENDs message.
         """
         return []
 
-    def balance_in(self):
+    def join_in(self):
         """
         Get a list of (hid, wid) for parts which hold data of this part.
         i.e. Return the parts from which this part RECEIVE data shards.
         """
         return []
 
-    def balance_message(self, x:np.ndarray, tgt_hid, tgt_wid):
+    def join_message(self, x:np.ndarray, tgt_hid, tgt_wid):
         """
         Return the data cut that should be hold by (tgt_hid, tgt_wid).
         This is used for load-balancing across layers.
         The return type is None or (tgt_hid, tgt_wid, x, desc), where <desc> is
          the additional description for x. If <desc> is not necessary, leave None.
         """
-        desc = None
-        return (tgt_hid, tgt_wid, x, desc)
+        return (tgt_hid, tgt_wid, x)
 
-    def balance_merge(self, xlocal:np.ndarray, xlist:list):
+    def join_merge(self, xlocal:np.ndarray, xlist:list):
         """
         Merge and reshape the local data shard and received shards.
-        Elements of <xlist> are the return values of balance_merge().
+        Elements of <xlist> are the return values of join_merge().
         """
         return xlocal
 
     # get the global result
 
-    def global_join(self, xmat):
+    def global_result(self, xmat):
         """
         Merge local results of all parts and return the global result.
         Return the final result of this layer as if there is no parallelization.
@@ -153,7 +146,16 @@ class PhenLayer():
     # helper function
 
     def _merge_(self, xlocal, xlist, coord_local=(0,0), mat_shape=(2,2)):
-        pass
+        xmat = np.empty(mat_shape, dtype=np.ndarray)
+        xmat[coord_local] = xlocal
+        for hid, wid, xr in xlist:
+            offh = hid - self.hid
+            offw = wid - self.wid
+            xmat[coord_local[0] + offh, coord_local[1] + offw] = xr
+        xmat = np.ndarray(xmat) # turn into 3D
+        res = np.concatenate(
+            [ np.concatenate(xmat[i,:],2) for i in range(self.nw) ], 1)
+        return res
 
 # %% convolution layer
 
@@ -178,6 +180,8 @@ class PhenConv(PhenLayer):
         ishaper = make_shaper(self.nh, self.nw, 2, gshapes[idx])
         oshaper = make_shaper(self.nh, self.nw, 2, gshapes[idx+1])
         super().bind_in_model(ishaper, oshaper, idx, gshapes, layer_names)
+
+    # depend for Conv: copy dependent data
 
     def depend_out(self, x:np.ndarray):
         res = []
@@ -246,28 +250,25 @@ class PhenConv(PhenLayer):
             [ np.concatenate(xmat[i,:],2) for i in range(self.nw) ], 1)
         return res
 
-    def local_prepare(self, x:np.ndarray):
-        if self.conf.padding == 0:
-            return x
-        res = computil.pad_data(x, self.padding, self.wid==0, self.hid==0,
-                                self.wid==self.nw-1, self.hid==self.nh-1)
-        return res
-
     def local_forward(self, x:np.ndarray):
+        if self.conf.padding != 0:
+            x = computil.pad_data(x, self.padding, self.wid==0, self.hid==0,
+                                  self.wid==self.nw-1, self.hid==self.nh-1)
         return computil.conv2d(x, self.conf, self.weight, self.bias, False)
 
-    def balance_out(self, x:np.ndarray):
+    # join of Conv: balance the output
+
+    def join_out(self, x:np.ndarray):
         return []
 
-    def balance_in(self, x:np.ndarray):
+    def join_in(self, x:np.ndarray):
         return []
 
-    def balance_message(self, x:np.ndarray, tgt_hid, tgt_wid):
-        desc = None
-        return (tgt_hid, tgt_wid, x, desc)
+    def join_message(self, x:np.ndarray, tgt_hid, tgt_wid):
+        return (tgt_hid, tgt_wid, x)
 
-    def balance_merge(self, xlocal:np.ndarray, xlist:list):
-        raise NotImplementedError("The balance_merge function is not implemented")
+    def join_merge(self, xlocal:np.ndarray, xlist:list):
+        raise NotImplementedError("The join_merge function is not implemented")
 
     def global_join(self, xmat):
         xmat = np.ndarray(xmat)
@@ -308,7 +309,8 @@ class PhenLinear(PhenLayer):
 
     def bind_in_model(self, ishaper:Shaper, oshaper:Shaper,
                       idx:int, gshapes:list[tuple], layer_names:list[str]):
-        super().bind_in_model(self.ishaper, oshaper, idx, gshapes, layer_names)
+        assert ishaper == self.ishaper
+        super().bind_in_model(ishaper, oshaper, idx, gshapes, layer_names)
         # find last non-trivial layer
         last_idx = idx - 1
         while last_idx >= 0 and layer_names[last_idx] in ["flatten", "identity"]:
@@ -316,24 +318,10 @@ class PhenLinear(PhenLayer):
         # update the local weights for Conv Layer
         if idx != 0 and last_idx >= 0 and layer_names[last_idx] == "conv":
             #assert len(gshapes[last_idx]) == 3
-            pshaper = make_shaper(self.nh, self.nw, 2, gshapes[last_idx+1])
-            w = self.weight.reshape((self.out_ch, -1))
-            self.local_weight = pshaper.pick_data(self.hid, self.wid, w)
-
-    def depend_to(self, x:np.ndarray):
-        return []
-
-    def depend_from(self, x:np.ndarray):
-        return []
-
-    def depend_message(self, x:np.ndarray, tgt_hid:int, tgt_wid:int, desc):
-        return (self.hid, self.wid, x)
-
-    def depend_merge(self, xlocal:np.ndarray, xlist:list):
-        return xlocal
-
-    def local_prepare(self, x:np.ndarray):
-        return x
+            poshape= gshapes[last_idx+1]
+            pshaper = make_shaper(self.nh, self.nw, 2, poshape)
+            w = self.weight.reshape(poshape)
+            self.local_weight = pshaper.pick_data(self.hid, self.wid, w).ravel()
 
     def local_forward(self, x:np.ndarray):
         #print(x, self.local_weight, self.local_bias)
@@ -363,11 +351,8 @@ class PhenLinear(PhenLayer):
 # %% flatten layer
 
 class PhenFlatten(PhenLayer):
-    def __init__(self, nh, nw, hid, wid, ishape):
+    def __init__(self, nh, nw, hid, wid):
         super().__init__(nh, nw, hid, wid, "flatten")
-        self.ishape = ishape
-        assert ishape.ndim == 3
-        dch, dw, dh = ishape
 
     def local_forward(self, x:np.ndarray):
         return x.reshape((-1))
@@ -377,7 +362,24 @@ class PhenFlatten(PhenLayer):
 
     def out_shape(self, inshape:tuple):
         assert len(inshape) == 1
-        return (None, )
+        o = np.prod(inshape)
+        return (o, )
+
+
+# %%
+
+class PhenIdentity(PhenLayer):
+    def __init__(self, nh, nw, hid, wid):
+        super().__init__(nh, nw, hid, wid, "identity")
+
+    def local_forward(self, x:np.ndarray):
+        return x
+
+    def in_shape(self):
+        return None
+
+    def out_shape(self, inshape:tuple):
+        return inshape
 
 
 # %% activation layers
