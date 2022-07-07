@@ -16,6 +16,14 @@ def bind_torch(he_module, torch_module):
     return he_module
 
 
+def make_layer(ref:nn.Module):
+    if isinstance(ref, nn.Linear):
+        return make_linear(ref)
+    elif isinstance(ref, nn.Conv2d):
+        return make_conv2d(ref)
+    raise ValueError("Layer type",type(ref),"is not supported")
+
+
 # %% linear
 
 def make_linear(ref:nn.Linear):
