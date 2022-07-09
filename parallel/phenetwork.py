@@ -81,14 +81,14 @@ class PhenLayer():
     # join the local computation.
     # involve: merge partial results, repartition for load-balance
 
-    def join_out(self):
+    def join_out(self, x:np.ndarray):
         """
         Get list of (hid, wid) for parts whose data is partly hold by this part.
         i.e. Return the parts to which this part SENDs message.
         """
         return []
 
-    def join_in(self):
+    def join_in(self, x:np.ndarray):
         """
         Get a list of (hid, wid) for parts which hold data of this part.
         i.e. Return the parts from which this part RECEIVE data shards.
@@ -286,6 +286,7 @@ class PhenConv(PhenLayer):
         ox, oy = self.conf.comp_out_size(inshape[1], inshape[2])
         return (self.conf.out_ch, ox, oy)
 
+
 # %% fully connected layer
 
 class PhenLinear(PhenLayer):
@@ -304,8 +305,12 @@ class PhenLinear(PhenLayer):
         self.local_weight = self.ishaper.pick_data(hid, wid, self.weight)
         # set local bias:
         #   the pid-th part handles the pid-th channel's bias
-        self.local_bias = np.zeros((self.out_ch))
-        self.local_bias[self.pid::self.npart] = self.bias[self.pid::self.npart]
+        #self.jshaper = make_shaper(self.nh, self.nw, 1, (self.out_ch,), interleave=True)
+        if self.bias is None:
+            self.local_bias = None
+        else:
+            self.local_bias = np.zeros((self.out_ch))
+            self.local_bias[self.pid::self.npart] = self.bias[self.pid::self.npart]
 
     def bind_in_model(self, ishaper:Shaper, oshaper:Shaper,
                       idx:int, gshapes:list[tuple], layer_names:list[str]):
@@ -330,6 +335,20 @@ class PhenLinear(PhenLayer):
         #print(r.shape, None if self.local_bias is None else self.local_bias.shape)
         if self.local_bias is not None:
             r += self.local_bias
+        return r
+
+    def join_out(self, x:np.ndarray):
+        return [divmod(i, self.nw) for i in range(self.npart)]
+
+    def join_in(self, x:np.ndarray):
+        return [divmod(i, self.nw) for i in range(self.npart)]
+
+    def join_message(self, x:np.ndarray, tgt_hid, tgt_wid):
+        m = self.oshaper.pick_data(tgt_hid, tgt_wid, x)
+        return (tgt_hid, tgt_wid, m)
+
+    def join_merge(self, xlocal:np.ndarray, xlist:list):
+        r = heutil.hesum(xlist)
         return r
 
     def global_result(self, xmat):
