@@ -41,26 +41,24 @@ class PhenLayer():
 
     def depend_out(self, x:np.ndarray):
         """
-        Get list of (hid, wid, desc) for parts that DEPEND ON the data of this
+        Get list of (hid, wid) for parts that DEPEND ON the data of this
           part. i.e. Return the parts to which this part SENDs message.
-        The type and content of <desc> is determined by each layer.
         """
         return []
 
     def depend_in(self, x:np.ndarray):
         """
-        Get list of (hid, wid, desc) for parts which this part depends on.
+        Get list of (hid, wid) for parts which this part depends on.
           i.e. Return the parts from which this part RECEIVEs messages.
-        The type and content of <desc> is determined by each layer.
         """
         return []
 
-    def depend_message(self, x:np.ndarray, tgt_hid:int, tgt_wid:int, desc):
+    def depend_message(self, x:np.ndarray, tgt_hid:int, tgt_wid:int):
         """
         Return the data shard on which another part depends.
         This function respond to the depend_out() function.
         """
-        return (self.hid, self.wid, x)
+        return x
 
     def depend_merge(self, xlocal:np.ndarray, xlist:list):
         """
@@ -99,10 +97,8 @@ class PhenLayer():
         """
         Return the data cut that should be hold by (tgt_hid, tgt_wid).
         This is used for load-balancing across layers.
-        The return type is None or (tgt_hid, tgt_wid, x, desc), where <desc> is
-         the additional description for x. If <desc> is not necessary, leave None.
         """
-        return (tgt_hid, tgt_wid, x)
+        return x
 
     def join_merge(self, xlocal:np.ndarray, xlist:list):
         """
@@ -223,17 +219,19 @@ class PhenConv(PhenLayer):
     def depend_message(self, x:np.ndarray, tgt_hid:int, tgt_wid:int, desc:tuple):
         assert 0 <= tgt_hid < self.nh and tgt_hid != self.hid
         assert 0 <= tgt_wid < self.nw and tgt_wid != self.wid
+        hneed = self.conf.kernel_size[0] - self.conf.stride[0]
+        wneed = self.conf.kernel_size[1] - self.conf.stride[1]
         if tgt_hid == self.hid-1 and tgt_wid == self.wid-1:
             # upper left
-            return (tgt_hid, tgt_wid, x[:, :desc[0], :desc[1]])
+            return x[:, :hneed, :wneed]
         elif tgt_hid == self.hid and tgt_wid == self.wid-1:
             # left
             assert desc[0] == x.shape[1]
-            return (tgt_hid, tgt_wid, x[:, :, :desc[1]])
+            return x[:, :, :wneed]
         elif tgt_hid == self.hid-1 and tgt_wid == self.wid:
             # upper
             assert desc[1] == x.shape[2]
-            return (tgt_hid, tgt_wid, x[:, :desc[0], :])
+            return x[:, :hneed, :]
         return None
 
     def depend_merge(self, xlocal:np.ndarray, xlist:list):
@@ -265,10 +263,10 @@ class PhenConv(PhenLayer):
         return []
 
     def join_message(self, x:np.ndarray, tgt_hid, tgt_wid):
-        return (tgt_hid, tgt_wid, x)
+        return x
 
     def join_merge(self, xlocal:np.ndarray, xlist:list):
-        raise NotImplementedError("The join_merge function is not implemented")
+        return xlocal
 
     def global_result(self, xmat):
         xmat = np.ndarray(xmat)
@@ -345,7 +343,7 @@ class PhenLinear(PhenLayer):
 
     def join_message(self, x:np.ndarray, tgt_hid, tgt_wid):
         m = self.oshaper.pick_data(tgt_hid, tgt_wid, x)
-        return (tgt_hid, tgt_wid, m)
+        return m
 
     def join_merge(self, xlocal:np.ndarray, xlist:list):
         r = heutil.hesum(xlist)
