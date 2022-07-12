@@ -41,8 +41,10 @@ class PhenLayer():
 
     def depend_out(self, x:np.ndarray):
         """
-        Get list of (hid, wid) for parts that DEPEND ON the data of this
+        Get list of (hid, wid, desc) for parts that DEPEND ON the data of this
           part. i.e. Return the parts to which this part SENDs message.
+        The <desc> attribute is feed to depend_message(), to avoid redundant
+          computation. Its type and content may vary among different Layers.
         """
         return []
 
@@ -53,7 +55,7 @@ class PhenLayer():
         """
         return []
 
-    def depend_message(self, x:np.ndarray, tgt_hid:int, tgt_wid:int):
+    def depend_message(self, x:np.ndarray, tgt_hid:int, tgt_wid:int, desc=None):
         """
         Return the data shard on which another part depends.
         This function respond to the depend_out() function.
@@ -83,6 +85,8 @@ class PhenLayer():
         """
         Get list of (hid, wid) for parts whose data is partly hold by this part.
         i.e. Return the parts to which this part SENDs message.
+        The <desc> attribute is feed to join_message(), to avoid redundant
+          computation. Its type and content may vary among different Layers.
         """
         return []
 
@@ -93,7 +97,7 @@ class PhenLayer():
         """
         return []
 
-    def join_message(self, x:np.ndarray, tgt_hid, tgt_wid):
+    def join_message(self, x:np.ndarray, tgt_hid:int, tgt_wid:int, desc=None):
         """
         Return the data cut that should be hold by (tgt_hid, tgt_wid).
         This is used for load-balancing across layers.
@@ -155,7 +159,7 @@ class PhenLayer():
 
 # %% convolution layer
 
-# TODO: balance data after one conv
+# Need to re-partition data after one conv
 # e.g. conv with kernel size 3 for 0-5, with 2 workers:
 # input cut: [0, 1, 2], [3, 4, 5]
 # fill dependent: [0, 1, 2, 3, 4], [3, 4, 5]
@@ -173,64 +177,82 @@ class PhenConv(PhenLayer):
 
     def bind_in_model(self, ishaper:Shaper, oshaper:Shaper,
                       idx:int, gshapes:list[tuple], layer_names:list[str]):
-        ishaper = make_shaper(self.nh, self.nw, 2, gshapes[idx])
-        oshaper = make_shaper(self.nh, self.nw, 2, gshapes[idx+1])
+        assert ishaper.dim() == 2
+        assert ishaper.dim() == 2
         super().bind_in_model(ishaper, oshaper, idx, gshapes, layer_names)
+        # inputs:
+        # global coordinate of the upper left pixel (inclusive)
+        self.gi_ul = self.ishaper.get_offset(self.hid, self.wid)
+        # global coordinate of the lower right pixel (exclusive)
+        self.gi_lr = self.gi_ul + self.ishaper.get_shape(self.hid, self.wid)
+        # outputs:
+        self.go_ul = self.conf.comp_out_coord(self.gi_ul[0], self.gi_ul[1], True)
+        self.go_lr = self.conf.comp_out_coord(self.gi_lr[0], self.gi_lr[1], True)
 
     # depend for Conv: copy dependent data
 
+    def _calc_depend_hw_(self, hid, wid):
+        if hid == self.hid and wid == wid:
+            lr = self.gi_lr
+        else:
+            ul = self.ishaper.get_offset(hid, wid)
+            lr = ul + self.ishaper.get_shape(hid, wid)
+        last_h = (lr[0] // self.conf.stride[0])*self.conf.stride[0]
+        last_w = (lr[1] // self.conf.stride[1])*self.conf.stride[1]
+        hneed = max(0, last_h + self.conf.kernel_size[0] - 1 - lr[0])
+        wneed = max(0, last_w + self.conf.kernel_size[1] - 1 - lr[1])
+        return hneed, wneed
+
     def depend_out(self, x:np.ndarray):
         res = []
-        _, h, w = x.shape
-        hneed = self.conf.kernel_size[0] - self.conf.stride[0]
-        wneed = self.conf.kernel_size[1] - self.conf.stride[1]
-        if self.wid != 0:
-            # right
-                res.append((self.hid, self.wid - 1, (h, wneed)))
-        if self.hid != 0:
-            # lower
-            if wneed != 0:
-                res.append((self.hid - 1, self.wid, (hneed, w)))
-        if self.hid != 0 and self.wid != 0:
-            # lower right
-            if hneed != 0 and wneed != 0:
-                res.append((self.hid - 1, self.wid - 1, (hneed, wneed)))
+        # upper
+        if self.hid > 0:
+            hneed, wneed = self._calc_depend_hw_(self.hid-1, self.wid)
+            if hneed > 0:
+                res.append(self.hid - 1, self.wid)
+        # left
+        if self.wid > 0:
+            hneed, wneed = self._calc_depend_hw_(self.hid, self.wid-1)
+            if hneed > 0:
+                res.append(self.hid, self.wid - 1)
+        # upper left
+        if self.hid > 0 and self.wid > 0:
+            hneed, wneed = self._calc_depend_hw_(self.hid-1, self.wid-1)
+            if hneed > 0 and wneed > 0:
+                res.append((self.hid - 1, self.wid - 1))
         return res
 
     def depend_in(self, x:np.ndarray):
         res = []
         _, h, w = x.shape
-        hneed = self.conf.kernel_size[0] - self.conf.stride[0]
-        wneed = self.conf.kernel_size[1] - self.conf.stride[1]
-        if self.wid != self.nw-1:
-            # right
-            if hneed != 0:
-                res.append((self.hid, self.wid + 1, (h, wneed)))
-        if self.hid != self.nh-1:
-            # lower
-            if wneed != 0:
-                res.append((self.hid + 1, self.wid, (hneed, w)))
-        if self.hid != self.nh-1 and self.wid != self.nw-1:
-            # lower right
-            if hneed != 0 and wneed != 0:
+        hneed, wneed = self._calc_depend_hw_(self.hid, self.wid)
+        # right
+        if self.wid + 1 < self.nw and wneed > 0:
+            res.append((self.hid, self.wid + 1, (h, wneed)))
+        # lower
+        if self.hid + 1 < self.nh-1 and hneed > 0:
+            res.append((self.hid + 1, self.wid, (hneed, w)))
+        # lower right
+        if self.hid +1 < self.nh and self.wid + 1 < self.nw:
+            if hneed > 0 and wneed > 0:
                 res.append((self.hid + 1, self.wid + 1, (hneed, wneed)))
         return res
 
-    def depend_message(self, x:np.ndarray, tgt_hid:int, tgt_wid:int, desc:tuple):
+    def depend_message(self, x:np.ndarray, tgt_hid:int, tgt_wid:int, desc):
         assert 0 <= tgt_hid < self.nh and tgt_hid != self.hid
         assert 0 <= tgt_wid < self.nw and tgt_wid != self.wid
-        hneed = self.conf.kernel_size[0] - self.conf.stride[0]
-        wneed = self.conf.kernel_size[1] - self.conf.stride[1]
+        hneed, wneed = desc
+        return x[:, :hneed, :wneed]
         if tgt_hid == self.hid-1 and tgt_wid == self.wid-1:
             # upper left
             return x[:, :hneed, :wneed]
         elif tgt_hid == self.hid and tgt_wid == self.wid-1:
             # left
-            assert desc[0] == x.shape[1]
+            #assert desc[0] == x.shape[1]
             return x[:, :, :wneed]
         elif tgt_hid == self.hid-1 and tgt_wid == self.wid:
             # upper
-            assert desc[1] == x.shape[2]
+            #assert desc[1] == x.shape[2]
             return x[:, :hneed, :]
         return None
 
@@ -249,9 +271,11 @@ class PhenConv(PhenLayer):
         return res
 
     def local_forward(self, x:np.ndarray):
+        # padding
         if self.conf.padding != 0:
-            x = computil.pad_data(x, self.padding, self.wid==0, self.hid==0,
+            x = computil.pad_data(x, self.conf.padding, self.wid==0, self.hid==0,
                                   self.wid==self.nw-1, self.hid==self.nh-1)
+        # convolute
         return computil.conv2d(x, self.conf, self.weight, self.bias, False)
 
     # join of Conv: balance the output
@@ -262,7 +286,7 @@ class PhenConv(PhenLayer):
     def join_in(self, x:np.ndarray):
         return []
 
-    def join_message(self, x:np.ndarray, tgt_hid, tgt_wid):
+    def join_message(self, x:np.ndarray, tgt_hid, tgt_wid, desc):
         return x
 
     def join_merge(self, xlocal:np.ndarray, xlist:list):
@@ -350,6 +374,7 @@ class PhenLinear(PhenLayer):
         return r
 
     def global_result(self, xmat):
+        # interleaving based
         xlist = xmat.ravel()
         #assert len(xlist) == self.npart
         out = np.empty(self.out_ch, xlist[0].dtype)
