@@ -15,7 +15,7 @@ class Conv2dConf():
         padding: integer or integer pair, step size of the moving window
         groups: integer, number of group (x-channel operation are within a group)
         -------
-        in_ch/groups must be an integer. 
+        in_ch/groups must be an integer.
         weight must be of size (out_ch, in_ch/groups, kernel_size[0], kernel_size[1]).
         bias must be of size (in_ch/groups)
         '''
@@ -36,12 +36,12 @@ class Conv2dConf():
         assert in_ch % groups == 0
         self.in_ch_pg = in_ch // groups # in channles per group
         self.out_ch_pg = out_ch // groups
-        
+
     def check(self, weight, bias):
         assert weight.shape == (self.out_ch, self.in_ch_pg, *self.kernel_size)
         if bias:
             assert bias.shape == (self.out_ch)
-    
+
     def comp_out_size(self, sx:int, sy:int, padded:bool=False):
         # <padded> means whether <sx> and <sy> already considered the padding pixels
         px = 0 if padded else 2*self.padding[0]
@@ -55,6 +55,16 @@ class Conv2dConf():
         #    ox = int(np.floor(ox))
         #    oy = int(np.floor(oy))
         return ox, oy
+
+    def comp_out_coord(self, ix, iy, padded:bool=False):
+        px = 0 if padded else self.padding[0]
+        py = 0 if padded else self.padding[1]
+        cx, rx = divmod(px+ix, self.stride[0])
+        cy, ry = divmod(py+iy, self.stride[0])
+        if rx == 0 and ry == 0:
+            return cx, cy
+        else:
+            return None, None
 
 
 def conv2d(x, conf:Conv2dConf, weight, bias, doPad=True):
@@ -143,7 +153,7 @@ def pad_data(x, padding:(int,tuple), left=True, up=True, right=True, down=True):
         if down:
             data[:,:,-py:] = 0
     return data
-        
+
 
 def conv2d_channel(x, ch, conf:Conv2dConf, weight, bias, out=None):
     # No padding is considered inside this function.
@@ -161,7 +171,7 @@ def conv2d_channel(x, ch, conf:Conv2dConf, weight, bias, out=None):
     if out is None:
         ox, oy = conf.comp_out_size(nx, ny, True)
         out = np.empty((1, ox, oy), x.dtype)
-    
+
     oi, oj = 0, 0
     for i in range(0, nx - ksx + 1, conf.stride[0]):
         oj = 0
