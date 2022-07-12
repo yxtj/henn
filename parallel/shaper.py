@@ -10,6 +10,9 @@ class Shaper:
         self.npart = nh * nw
         self.dshape = data_shape
 
+    def dim(self):
+        return len(self.dshape)
+
     def __eq__(self, other):
         return type(self) == type(other) and \
             (self.nh,self.nw,self.dshape) == (other.nh,other.nw,other.dshape)
