@@ -41,8 +41,10 @@ def make_shaper(nh:int, nw:int, dim:int, data_shape:tuple, **kwargs):
     if dim == 1:
         if 'interleave' in kwargs and kwargs['interleave'] is True:
             return Shaper1D_interleave(nh, nw, data_shape[-1:])
-        else:
+        elif 'consecutive' in kwargs and kwargs['consecutive'] is True:
             return Shaper1D_consecutive(nh, nw, data_shape[-1:])
+        else:
+            return Shaper1D_interleave(nh, nw, data_shape[-1:])
     elif dim == 2:
         return Shaper2D(nh, nw, data_shape[-2:])
     raise ValueError(f"shaper of {dim} dimension is not supported")
