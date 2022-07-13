@@ -37,7 +37,7 @@ class PhenLayer():
 
     # workflow: depend -> local_forward -> join
 
-    # data dependency
+    # data dependency (x is local input)
 
     def depend_out(self, x:np.ndarray):
         """
@@ -78,7 +78,7 @@ class PhenLayer():
         """
         raise NotImplementedError("The local_forward function is not implemented")
 
-    # join the local computation.
+    # join the local computation (x is local output)
     # involve: merge partial results, repartition for load-balance
 
     def join_out(self, x:np.ndarray):
@@ -178,7 +178,7 @@ class PhenConv(PhenLayer):
     def bind_in_model(self, ishaper:Shaper, oshaper:Shaper,
                       idx:int, gshapes:list[tuple], layer_names:list[str]):
         assert ishaper.dim() == 2
-        assert ishaper.dim() == 2
+        assert oshaper.dim() == 2
         super().bind_in_model(ishaper, oshaper, idx, gshapes, layer_names)
         # inputs:
         # global coordinate of the upper left pixel (inclusive)
@@ -186,10 +186,10 @@ class PhenConv(PhenLayer):
         # global coordinate of the lower right pixel (exclusive)
         self.gi_lr = self.gi_ul + self.ishaper.get_shape(self.hid, self.wid)
         # outputs:
-        self.go_ul = self.conf.comp_out_coord(self.gi_ul[0], self.gi_ul[1], True)
-        self.go_lr = self.conf.comp_out_coord(self.gi_lr[0], self.gi_lr[1], True)
+        #self.go_ul = self.conf.comp_out_coord(self.gi_ul[0], self.gi_ul[1], True)
+        #self.go_lr = self.conf.comp_out_coord(self.gi_lr[0], self.gi_lr[1], True)
 
-    # depend for Conv: copy dependent data
+    # helpers
 
     def _calc_depend_hw_(self, hid, wid):
         if hid == self.hid and wid == wid:
@@ -203,23 +203,38 @@ class PhenConv(PhenLayer):
         wneed = max(0, last_w + self.conf.kernel_size[1] - 1 - lr[1])
         return hneed, wneed
 
+    def _calc_expected_out_box_(self, hid, wid):
+        oul = self.oshaper.get_offset(hid, wid)
+        olr = oul + self.oshaper.get_shape(hid, wid)
+        return (*oul, *olr)
+
+    def _calc_computed_out_box_(self, hid, wid):
+        iul = self.ishaper.get_offset(hid, wid)
+        ilr = iul + self.ishaper.get_shape(hid, wid)
+        oul = self.conf.comp_out_coord(iul[0], iul[1], True)
+        olr = self.conf.comp_out_coord(ilr[0], ilr[1], True)
+        return (*oul, *olr)
+
+    # depend for Conv: copy dependent data
+
     def depend_out(self, x:np.ndarray):
         res = []
+        _, h, w = x.shape
         # upper
         if self.hid > 0:
             hneed, wneed = self._calc_depend_hw_(self.hid-1, self.wid)
             if hneed > 0:
-                res.append(self.hid - 1, self.wid)
+                res.append(self.hid - 1, self.wid, (hneed, w))
         # left
         if self.wid > 0:
             hneed, wneed = self._calc_depend_hw_(self.hid, self.wid-1)
             if hneed > 0:
-                res.append(self.hid, self.wid - 1)
+                res.append(self.hid, self.wid - 1, (h, wneed))
         # upper left
         if self.hid > 0 and self.wid > 0:
             hneed, wneed = self._calc_depend_hw_(self.hid-1, self.wid-1)
             if hneed > 0 and wneed > 0:
-                res.append((self.hid - 1, self.wid - 1))
+                res.append((self.hid - 1, self.wid - 1, (hneed, wneed)))
         return res
 
     def depend_in(self, x:np.ndarray):
@@ -281,13 +296,75 @@ class PhenConv(PhenLayer):
     # join of Conv: balance the output
 
     def join_out(self, x:np.ndarray):
-        return []
+        expected = self._calc_expected_out_box_(self.hid, self.wid)
+        computed = self._calc_computed_out_box_(self.hid, self.wid)
+        res = []
+        eup, elf, edw, ert = expected
+        cup, clf, cdw, crt = computed
+        # up - 3
+        if cup < eup:
+            up_n = eup - cup
+            # up
+            res.append((self.hid-1, self.wid, (up_n, min(crt, ert) - max(clf, elf))))
+            # up left
+            if clf < elf:
+                res.append((self.hid-1, self.wid-1, (up_n, elf - clf)))
+            # up right
+            if crt > ert:
+                res.append((self.hid-1, self.wid+1, (up_n, crt - ert)))
+        # left
+        if clf < elf:
+            res.append((self.hid, self.wid-1, (cdw - max(cup, eup), elf - clf)))
+        # right
+        if crt > ert:
+            res.append((self.hid, self.wid+1, (cdw - max(cup, eup), crt - ert)))
+        # down - 3
+        if cdw > edw:
+            dw_n = cdw - edw
+            # down
+            res.append((self.hid+1, self.wid, (dw_n, min(crt, ert) - max(clf, elf))))
+            # down left
+            if clf < elf:
+                res.append((self.hid+1, self.wid-1, (dw_n, elf - clf)))
+            # down right
+            if crt > ert:
+                res.append((self.hid+1, self.wid+1, (dw_n, crt - ert)))
+        return res
 
     def join_in(self, x:np.ndarray):
-        return []
+        expected = self._calc_expected_out_box_(self.hid, self.wid)
+        computed = self._calc_computed_out_box_(self.hid, self.wid)
+        res = []
+        eup, elf, edw, ert = expected
+        cup, clf, cdw, crt = computed
+        _, h, w = x.shape
+        # up - 3
+        if cup > eup:
+            up_n = cup - eup
+            res.append((self.hid-1, self.wid, (up_n, w)))
+            if clf > elf:
+                res.append((self.hid-1, self.wid-1, (up_n, clf - elf)))
+            if crt < ert:
+                res.append((self.hid-1, self.wid+1, (up_n, ert - crt)))
+        # left
+        if clf > elf:
+            res.append((self.hid, self.wid-1, (h, clf - elf)))
+        # right
+        if crt < ert:
+            res.append((self.hid, self.wid+1, (h, ert - crt)))
+        # down - 3
+        if cdw < edw:
+            dw_n = edw - cdw
+            res.append((self.hid+1, self.wid, (dw_n, w)))
+            if clf > elf:
+                res.append((self.hid+1, self.wid-1, (dw_n, clf - elf)))
+            if crt < ert:
+                res.append((self.hid+1, self.wid+1, (dw_n, ert - crt)))
+        return res
 
     def join_message(self, x:np.ndarray, tgt_hid, tgt_wid, desc):
-        return x
+        h, w = desc
+        return x[:, :h, :w]
 
     def join_merge(self, xlocal:np.ndarray, xlist:list):
         return xlocal
@@ -360,12 +437,12 @@ class PhenLinear(PhenLayer):
         return r
 
     def join_out(self, x:np.ndarray):
-        return [divmod(i, self.nw) for i in range(self.npart)]
+        return [(*divmod(i, self.nw), None) for i in range(self.npart)]
 
     def join_in(self, x:np.ndarray):
         return [divmod(i, self.nw) for i in range(self.npart)]
 
-    def join_message(self, x:np.ndarray, tgt_hid, tgt_wid):
+    def join_message(self, x:np.ndarray, tgt_hid, tgt_wid, desc):
         m = self.oshaper.pick_data(tgt_hid, tgt_wid, x)
         return m
 
