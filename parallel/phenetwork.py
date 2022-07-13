@@ -11,7 +11,7 @@ from .shaper import Shaper, make_shaper #Shaper1D, Shaper2D,
 # %% layers
 
 class PhenLayer():
-    def __init__(self, nh, nw, hid, wid, name=None):
+    def __init__(self, nh, nw, hid, wid, ltype=None, name=None, dim=None):
         self.nh = nh
         self.nw = nw
         self.hid = hid
@@ -19,18 +19,34 @@ class PhenLayer():
         # derivated properties
         self.npart = nh*nw # number of parts in total
         self.pid = hid*nw + wid # part id (sequence id)
+        # layer property
+        self.ltype = ltype.lower()
+        if dim is not None:
+            self.dim = dim
+        else:
+            if self.ltype == "linear":
+                self.dim = 1
+            elif self.ltype == "conv":
+                self.dim = 2
+            elif self.ltype == "flatten":
+                self.dim = 2
+            elif self.ltype == "identity":
+                self.dim = 0
+            elif self.ltype == "relu" or self.ltype == "square":
+                self.dim = 0
+            else:
+                self.dim = 0
         self.name = name
 
-    def name(self):
-        return self.name
-
     def bind_in_model(self, ishaper:Shaper, oshaper:Shaper,
-                      idx:int, gshapes:list[tuple], layer_names:list[str]):
+                      idx:int, gshapes:list[tuple], layer_types:list[str]):
         self.ishaper = ishaper
         self.oshaper = oshaper
         self.layer_idx = idx
         self.gshapes = gshapes
-        self.layers = layer_names
+        if self.name is None:
+            self.name = str(idx)
+        #self.layers = layer_types
 
     def __call__(self, x:np.ndarray):
         return self.local_forward(x)
@@ -168,18 +184,18 @@ class PhenLayer():
 # expected input for next conv; [0, 1], [2, 3]
 
 class PhenConv(PhenLayer):
-    def __init__(self, nh, nw, hid, wid, conv:hennlayer.Conv2d):
-        super().__init__(nh, nw, hid, wid, "conv")
+    def __init__(self, nh, nw, hid, wid, conv:hennlayer.Conv2d, name=None):
+        super().__init__(nh, nw, hid, wid, "conv", name)
         self.conf = computil.Conv2dConf(conv.in_ch, conv.out_ch, conv.kernel_size,
                                         conv.stride, conv.padding, conv.groups)
         self.weight = conv.weight
         self.bias = conv.bias
 
     def bind_in_model(self, ishaper:Shaper, oshaper:Shaper,
-                      idx:int, gshapes:list[tuple], layer_names:list[str]):
+                      idx:int, gshapes:list[tuple], layer_types:list[str]):
         assert ishaper.dim() == 2
         assert oshaper.dim() == 2
-        super().bind_in_model(ishaper, oshaper, idx, gshapes, layer_names)
+        super().bind_in_model(ishaper, oshaper, idx, gshapes, layer_types)
         # inputs:
         # global coordinate of the upper left pixel (inclusive)
         self.gi_ul = self.ishaper.get_offset(self.hid, self.wid)
@@ -389,8 +405,8 @@ class PhenConv(PhenLayer):
 # %% fully connected layer
 
 class PhenLinear(PhenLayer):
-    def __init__(self, nh, nw, hid, wid, linear:hennlayer.Linear):
-        super().__init__(nh, nw, hid, wid, "linear")
+    def __init__(self, nh, nw, hid, wid, linear:hennlayer.Linear, name=None):
+        super().__init__(nh, nw, hid, wid, "linear", name)
         self.in_ch = linear.in_ch
         self.out_ch = linear.out_ch
         self.weight = linear.weight # shape: out_ch * in_ch
@@ -412,15 +428,15 @@ class PhenLinear(PhenLayer):
             self.local_bias[self.pid::self.npart] = self.bias[self.pid::self.npart]
 
     def bind_in_model(self, ishaper:Shaper, oshaper:Shaper,
-                      idx:int, gshapes:list[tuple], layer_names:list[str]):
+                      idx:int, gshapes:list[tuple], layer_types:list[str]):
         assert ishaper == self.ishaper
-        super().bind_in_model(ishaper, oshaper, idx, gshapes, layer_names)
+        super().bind_in_model(ishaper, oshaper, idx, gshapes, layer_types)
         # find last non-trivial layer
         last_idx = idx - 1
-        while last_idx >= 0 and layer_names[last_idx] in ["flatten", "identity"]:
+        while last_idx >= 0 and layer_types[last_idx] in ["flatten", "identity"]:
             last_idx -= 1
         # update the local weights for Conv Layer
-        if idx != 0 and last_idx >= 0 and layer_names[last_idx] == "conv":
+        if idx != 0 and last_idx >= 0 and layer_types[last_idx] == "conv":
             #assert len(gshapes[last_idx]) == 3
             poshape= gshapes[last_idx+1]
             pshaper = make_shaper(self.nh, self.nw, 2, poshape)
@@ -470,8 +486,8 @@ class PhenLinear(PhenLayer):
 # %% flatten layer
 
 class PhenFlatten(PhenLayer):
-    def __init__(self, nh, nw, hid, wid):
-        super().__init__(nh, nw, hid, wid, "flatten")
+    def __init__(self, nh, nw, hid, wid, name=None):
+        super().__init__(nh, nw, hid, wid, "flatten", name)
 
     def local_forward(self, x:np.ndarray):
         return x.reshape((-1))
@@ -488,8 +504,8 @@ class PhenFlatten(PhenLayer):
 # %% identity layer
 
 class PhenIdentity(PhenLayer):
-    def __init__(self, nh, nw, hid, wid):
-        super().__init__(nh, nw, hid, wid, "identity")
+    def __init__(self, nh, nw, hid, wid, name=None):
+        super().__init__(nh, nw, hid, wid, "identity", name)
 
     def local_forward(self, x:np.ndarray):
         return x
@@ -504,8 +520,8 @@ class PhenIdentity(PhenLayer):
 # %% activation layers
 
 class PhenRelu(PhenLayer):
-    def __init__(self, nh, nw, hid, wid):
-        super().__init__(nh, nw, hid, wid, "relu")
+    def __init__(self, nh, nw, hid, wid, name=None):
+        super().__init__(nh, nw, hid, wid, "relu", name)
 
     def local_forward(self, x:np.ndarray):
         if x.dtype is not object:
@@ -523,8 +539,8 @@ class PhenRelu(PhenLayer):
 
 
 class PhenSquare(PhenLayer):
-    def __init__(self, nh, nw, hid, wid):
-        super().__init__(nh, nw, hid, wid, "square")
+    def __init__(self, nh, nw, hid, wid, name=None):
+        super().__init__(nh, nw, hid, wid, "square", name)
 
     def local_forward(self, x:np.ndarray):
         if x.dtype is not object:
