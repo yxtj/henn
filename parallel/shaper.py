@@ -32,6 +32,9 @@ class Shaper:
     def get_indexes(self, hid, wid):
         raise NotImplementedError("method get_indexes is not implemented")
 
+    def comp_part(self, coord:tuple):
+        raise NotImplementedError("method comp_part is not implemented")
+
 
 def make_shaper(nh:int, nw:int, dim:int, data_shape:tuple, **kwargs):
     assert isinstance(data_shape, tuple)
@@ -79,6 +82,21 @@ class Shaper1D_consecutive(Shaper):
         i1, i2 = self.ind[sid], self.ind[sid+1]
         return np.arange(i1, i2)
 
+    def comp_part(self, coord):
+        if isinstance(coord, int):
+            sid = coord
+        elif isinstance(coord, tuple) and len(coord) == 1:
+            sid = coord[0]
+        else:
+            raise NotImplementedError("type of coord is not supported")
+        assert sid < self.n
+        p = sid // self.npart
+        if self.ind[p] <= sid:
+            return p
+        else:
+            return p-1
+
+
 
 class Shaper1D_interleave(Shaper):
     def __init__(self, nh:int, nw:int, data_shape:tuple):
@@ -108,6 +126,16 @@ class Shaper1D_interleave(Shaper):
         sid = hid*self.nw + wid
         return np.arange(sid, self.n, self.npart)
 
+    def comp_part(self, coord):
+        if isinstance(coord, int):
+            sid = coord
+        elif isinstance(coord, tuple) and len(coord) == 1:
+            sid = coord[0]
+        else:
+            raise NotImplementedError("type of coord is not supported")
+        assert sid < self.n
+        p = sid % self.npart
+        return p
 
 Shaper1D = Shaper1D_consecutive
 
@@ -147,4 +175,18 @@ class Shaper2D(Shaper):
         for i in range(h):
             off[i,:] = (h1+i)*self.nw + np.arange(w1, w2)
         return off
+
+    def comp_part(self, coord:tuple):
+        if isinstance(coord, tuple) and len(coord) == 2:
+            h, w = coord
+        else:
+            raise NotImplementedError("type of coord is not supported")
+        hid = h // self.nh
+        wid = w // self.nw
+        if self.indh[hid] > h:
+            hid -= 1
+        if self.indw[wid] > w:
+            wid -= 1
+        return hid, wid
+
 
