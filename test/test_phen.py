@@ -7,8 +7,10 @@ import hennlayer as hn
 import torch
 import torch.nn as nn
 import hennlayer_torch as hnt
-import hecomp
+import heutil
 import computil
+
+# %% correctness
 
 def test_linear():
     fc_t = nn.Linear(5, 10)
@@ -16,7 +18,7 @@ def test_linear():
     #fc_h = hnt.bind_torch(fc_h, fc_t)
     fc_h = hnt.make_linear(fc_t)
     fc_p = pn.PhenLinear(1, 1, 0, 0, fc_h)
-    
+
     diff = []
     for i in range(10):
         x = torch.rand((5))
@@ -26,13 +28,13 @@ def test_linear():
         diff.append(d)
     print("Linear correct:", np.all(np.abs(diff)<1e-4))
     print("difference:",diff)
-    
+
 
 def test_conv():
     conv_t = nn.Conv2d(2, 4, 3)
     conv_h = hnt.make_conv2d(conv_t)
     conv_p = pn.PhenConv(1, 1, 0, 0, conv_h)
-    
+
     diff = []
     for i in range(10):
         x = torch.rand((2,10,10))
@@ -42,15 +44,16 @@ def test_conv():
         diff.append(d)
     print("Conv correct:", np.all(np.abs(diff)<1e-4))
     print("  difference:",diff)
-    
-    
+
+# %% parallelization of one layer
+
 def parallel_linear(nh=2, nw=2, nchin=100, nchout=10):
     fc_t = nn.Linear(nchin, nchout)
     fc_h = hnt.make_linear(fc_t)
     fcs = [[pn.PhenLinear(nh, nw, hid, wid, fc_h) for wid in range(nw)]
           for hid in range(nh)]
     #ind = np.linspace(0, nchin, nh*nw+1, dtype=int)
-    
+
     diff = []
     for _ in range(10):
         x = torch.rand((nchin))
@@ -64,7 +67,7 @@ def parallel_linear(nh=2, nw=2, nchin=100, nchout=10):
                 cut = xp[fc.pid::fc.npart]
                 o = fc.local_forward(cut)
                 ops.append(o)
-        op = hecomp.hesum(ops)
+        op = heutil.hesum(ops)
         d = np.abs(ot-op).mean()
         diff.append(d)
     print(f"Parallel {nh}x{nw}: linear correct:", np.all(np.abs(diff)<1e-4))
@@ -76,7 +79,7 @@ def parallel_conv(nh=2, nw=2, ks=3, stride=1, pad=0, sz=10):
     conv_h = hnt.make_conv2d(conv_t)
     convs = [[pn.PhenConv(nh, nw, hid, wid, conv_h) for wid in range(nw)]
           for hid in range(nh)]
-    
+
     psx = sz + 2*pad
     psy = sz + 2*pad
     indh = np.linspace(0, psx, nh+1, dtype=int)
@@ -91,7 +94,7 @@ def parallel_conv(nh=2, nw=2, ks=3, stride=1, pad=0, sz=10):
             q, r = divmod(indw[i], stride)
             if r != 0:
                 indw[i] = (q+1)*stride
-    
+
     diff = []
     for _ in range(10):
         x = torch.rand((2, sz, sz))
@@ -114,26 +117,26 @@ def parallel_conv(nh=2, nw=2, ks=3, stride=1, pad=0, sz=10):
         diff.append(d)
     print(f"Parallel {nh}x{nw}: Conv kernel-{ks}, stride-{stride}, pad-{pad}, correct:", np.all(np.abs(diff)<1e-4))
     print("  difference:",diff)
-    
-    
+
+# %% main
+
 def main():
     # correctness
     #test_linear()
     #test_conv()
-    
+
     # parallel linear
-    parallel_linear(2, 2, 100, 10)
-    parallel_linear(3, 2, 100, 10)
-    parallel_linear(3, 3, 100, 10)
-    
+    #parallel_linear(2, 2, 100, 10)
+    #parallel_linear(3, 2, 100, 10)
+    #parallel_linear(3, 3, 100, 10)
+
     # parallel conv
-    #parallel_conv(2, 2, 3, 1, 0, 9)
+    parallel_conv(2, 2, 3, 1, 0, 9)
     #parallel_conv(2, 2, 3, 1, 0, 10)
     #arallel_conv(2, 2, 3, 1, 1, 10)
     #parallel_conv(2, 2, 3, 2, 0, 10)
     #parallel_conv(2, 2, 3, 2, 1, 10)
-    
+
 
 if __name__ == "__main__":
     main()
-    
