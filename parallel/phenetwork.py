@@ -129,10 +129,11 @@ class PhenLayer():
 
     # get the global result
 
-    def global_result(self, xmat):
+    def global_result(self, xmat:np.ndarray):
         """
         Merge local results of all parts and return the global result.
         Return the final result of this layer as if there is no parallelization.
+        <xmat> is np.ndarray of size (nh, nw) and its dtype is np.ndarray.
         """
         raise NotImplementedError("The global_result function is not implemented")
 
@@ -394,7 +395,7 @@ class PhenConv(PhenLayer):
     def join_merge(self, xlocal:np.ndarray, xlist:list):
         return xlocal
 
-    def global_result(self, xmat):
+    def global_result(self, xmat:np.ndarray):
         assert xmat.ndim == 2
         assert xmat.shape == (self.nh, self.nw)
         assert xmat[0,0].shape[0] == self.conf.out_ch
@@ -477,7 +478,7 @@ class PhenLinear(PhenLayer):
         r = heutil.hesum(xlist)
         return r
 
-    def global_result(self, xmat):
+    def global_result(self, xmat:np.ndarray):
         # interleaving based
         xlist = xmat.ravel()
         #assert len(xlist) == self.npart
@@ -500,8 +501,27 @@ class PhenFlatten(PhenLayer):
     def __init__(self, nh, nw, hid, wid, name=None):
         super().__init__(nh, nw, hid, wid, "flatten", name)
 
+    def bind_in_model(self, ishaper, oshaper, idx, gshapes, layer_types):
+        assert ishaper.dim() >= 2
+        assert oshaper.dim() == 1
+        super().bind_in_model(ishaper, oshaper, idx, gshapes, layer_types)
+
     def local_forward(self, x:np.ndarray):
         return x.reshape((-1))
+
+    def global_result(self, xmat:np.ndarray):
+        assert self.ishaper.dim() == 2
+        out = np.empty(self.oshaper.n, xmat[0, 0].dtype)
+        gh, gw = self.ishaper.gshape
+        for hid in range(self.nh):
+            for wid in range(self.nw):
+                # assume input is 3d (channel, height, width)
+                shape = self.ishaper.get_shape(hid, wid)
+                h, w = shape
+                off = self.ishaper.get_offset(hid, wid)
+                x = xmat[hid, wid].reshape(-1, h, w)
+                out.reshape(-1, gh, gw)[:, off[0]:off[0]+h, off[1]:off[1]+w] = x
+        return out
 
     def in_shape(self):
         return None
