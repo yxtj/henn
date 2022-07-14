@@ -395,8 +395,9 @@ class PhenConv(PhenLayer):
         return xlocal
 
     def global_result(self, xmat):
-        xmat = np.ndarray(xmat)
-        assert xmat.shape == (self.nh, self.nw, self.conf.out_ch)
+        assert xmat.ndim == 2
+        assert xmat.shape == (self.nh, self.nw)
+        assert xmat[0,0].shape[0] == self.conf.out_ch
         res = np.concatenate(
             [ np.concatenate(xmat[i,:],2) for i in range(self.nw) ], 1)
         return res
@@ -450,7 +451,8 @@ class PhenLinear(PhenLayer):
             poshape= gshapes[last_idx+1]
             pshaper = make_shaper(self.nh, self.nw, 2, poshape)
             w = self.weight.reshape((self.out_ch, *poshape))
-            self.local_weight = pshaper.pick_data(self.hid, self.wid, w).ravel()
+            lw = pshaper.pick_data(self.hid, self.wid, w)
+            self.local_weight = lw.reshape(self.out_ch, -1)
 
     def local_forward(self, x:np.ndarray):
         #print(x, self.local_weight, self.local_bias)
