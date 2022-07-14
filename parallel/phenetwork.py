@@ -221,18 +221,23 @@ class PhenConv(PhenLayer):
 
     def _calc_expected_in_box_(self, hid, wid):
         iul = self.ishaper.get_offset(hid, wid)
-        ilr = iul + self.ishaper.get_shape(hid, wid)
+        s = self.ishaper.get_shape(hid, wid)
+        ilr = (iul[0] + s[0] + self.conf.kernel_size[0] - 1,
+               iul[1] + s[1] + self.conf.kernel_size[1] - 1)
         return (*iul, *ilr)
 
     def _calc_expected_out_box_(self, hid, wid):
         oul = self.oshaper.get_offset(hid, wid)
-        olr = oul + self.oshaper.get_shape(hid, wid)
+        s = self.oshaper.get_shape(hid, wid)
+        olr = (oul[0] + s[0], oul[1] + s[1])
         return (*oul, *olr)
 
     def _calc_computed_out_box_(self, hid, wid):
-        iup, ilf, idw, irt = self._calc_expected_in_box_(hid, wid)
-        oul = self.conf.comp_out_coord(iup, ilf, True)
-        olr = self.conf.comp_out_coord(idw, irt, True)
+        iul = self.ishaper.get_offset(hid, wid)
+        s = self.ishaper.get_shape(hid, wid)
+        ilr = (iul[0] + s[0], iul[1] + s[1])
+        oul = self.conf.comp_out_coord(iul[0], iul[1], True)
+        olr = self.conf.comp_out_coord(ilr[0], ilr[1], True)
         return (*oul, *olr)
 
     # depend for Conv: copy dependent data
@@ -444,7 +449,7 @@ class PhenLinear(PhenLayer):
             #assert len(gshapes[last_idx]) == 3
             poshape= gshapes[last_idx+1]
             pshaper = make_shaper(self.nh, self.nw, 2, poshape)
-            w = self.weight.reshape(poshape)
+            w = self.weight.reshape((self.out_ch, *poshape))
             self.local_weight = pshaper.pick_data(self.hid, self.wid, w).ravel()
 
     def local_forward(self, x:np.ndarray):
