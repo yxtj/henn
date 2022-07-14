@@ -8,14 +8,14 @@ class Shaper:
         self.nh = nh
         self.nw = nw
         self.npart = nh * nw
-        self.dshape = data_shape
+        self.gshape = data_shape
 
     def dim(self):
-        return len(self.dshape)
+        return len(self.gshape)
 
     def __eq__(self, other):
         return type(self) == type(other) and \
-            (self.nh,self.nw,self.dshape) == (other.nh,other.nw,other.dshape)
+            (self.nh,self.nw,self.gshape) == (other.nh,other.nw,other.gshape)
 
     def get_shape(self, hid, wid):
         raise NotImplementedError("method get_shape is not implemented")
