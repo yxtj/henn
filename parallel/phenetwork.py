@@ -219,16 +219,20 @@ class PhenConv(PhenLayer):
         wneed = max(0, last_w + self.conf.kernel_size[1] - 1 - lr[1])
         return hneed, wneed
 
+    def _calc_expected_in_box_(self, hid, wid):
+        iul = self.ishaper.get_offset(hid, wid)
+        ilr = iul + self.ishaper.get_shape(hid, wid)
+        return (*iul, *ilr)
+
     def _calc_expected_out_box_(self, hid, wid):
         oul = self.oshaper.get_offset(hid, wid)
         olr = oul + self.oshaper.get_shape(hid, wid)
         return (*oul, *olr)
 
     def _calc_computed_out_box_(self, hid, wid):
-        iul = self.ishaper.get_offset(hid, wid)
-        ilr = iul + self.ishaper.get_shape(hid, wid)
-        oul = self.conf.comp_out_coord(iul[0], iul[1], True)
-        olr = self.conf.comp_out_coord(ilr[0], ilr[1], True)
+        iup, ilf, idw, irt = self._calc_expected_in_box_(hid, wid)
+        oul = self.conf.comp_out_coord(iup, ilf, True)
+        olr = self.conf.comp_out_coord(idw, irt, True)
         return (*oul, *olr)
 
     # depend for Conv: copy dependent data
