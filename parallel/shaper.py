@@ -17,6 +17,9 @@ class Shaper:
         return type(self) == type(other) and \
             (self.nh,self.nw,self.gshape) == (other.nh,other.nw,other.gshape)
 
+    def __repr__(self):
+        return f"Shaper of {self.nh}x{self.nw} on shape {self.gshape}"
+
     def get_shape(self, hid, wid):
         raise NotImplementedError("method get_shape is not implemented")
 
@@ -59,6 +62,9 @@ class Shaper1D_consecutive(Shaper):
         self.n = n
         self.ind = np.linspace(0, n, self.npart+1, dtype=int)
 
+    def __repr__(self):
+        return super().__repr__()+" 1D-consecutive"
+
     def get_shape(self, hid, wid):
         sid = hid*self.nw + wid
         i1, i2 = self.ind[sid], self.ind[sid+1]
@@ -99,13 +105,15 @@ class Shaper1D_consecutive(Shaper):
             return p-1
 
 
-
 class Shaper1D_interleave(Shaper):
     def __init__(self, nh:int, nw:int, data_shape:tuple):
         assert len(data_shape) == 1
         super().__init__(nh, nw, data_shape)
         n = data_shape[0]
         self.n = n
+
+    def __repr__(self):
+        return super().__repr__()+" 1D-interleave"
 
     def get_shape(self, hid, wid):
         sid = hid*self.nw + wid
