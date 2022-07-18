@@ -81,7 +81,8 @@ class PhenLayer():
     def depend_merge(self, xlocal:np.ndarray, xlist:list):
         """
         Merge the local data and dependent data (get by cross_message) for processing.
-        The xlist is a list storing the results of cross_message() from other parts.
+        The <xlist> is a list of (hid, wid, data), where <data> is the result of
+          depend_message() on part (hid, wid).
         """
         return xlocal
 
@@ -123,7 +124,8 @@ class PhenLayer():
     def join_merge(self, xlocal:np.ndarray, xlist:list):
         """
         Merge and reshape the local data shard and received shards.
-        Elements of <xlist> are the return values of join_merge().
+        The <xlist> is a list of (hid, wid, data), where <data> is the result of
+          join_message() on part (hid, wid).
         """
         return xlocal
 
@@ -475,7 +477,8 @@ class PhenLinear(PhenLayer):
         return m
 
     def join_merge(self, xlocal:np.ndarray, xlist:list):
-        r = heutil.hesum(xlist)
+        data = [d for hid, wid, d in xlist]
+        r = heutil.hesum(data)
         return r
 
     def global_result(self, xmat:np.ndarray):
