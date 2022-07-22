@@ -38,6 +38,22 @@ class Shaper:
     def comp_part(self, coord:tuple):
         raise NotImplementedError("method comp_part is not implemented")
 
+    def comp_covered_parts(self, rng:tuple):
+        """
+        Compute the parts covered by the input range <rng>.
+        <rng> is the range of all dimensions. Ranges are in close-open form.
+            [d1_f, d2_f, ..., dk_f, d1_l, d2_l, ..., dk_l]
+        Returns list of parts covered by <rng> and the covered ranges:
+            (hid, wid, (d1_f, ..., dk_l))
+        """
+        raise NotImplementedError("method comp_covered_parts is not implemented")
+
+    def comp_partly_convered_parts(self, rng:tuple):
+        """
+        Compute the parts that are partly converd by the input range.
+        The input and return type are the same as comp_convered_parts
+        """
+        raise NotImplementedError("method comp_partly_convered_parts is not implemented")
 
 def make_shaper(nh:int, nw:int, dim:int, data_shape:tuple, **kwargs):
     assert isinstance(data_shape, tuple)
@@ -103,6 +119,31 @@ class Shaper1D_consecutive(Shaper):
             return p
         else:
             return p-1
+
+    def comp_covered_parts(self, rng:tuple):
+        # right: a[i-1] <= v < a[i]
+        s1 = np.searchsorted(self.ind, rng[0], 'right') - 1
+        # left:  a[i-1] < v <= a[i]
+        s2 = np.searchsorted(self.ind, rng[1], 'left')
+        res = []
+        for s in range(s1, s2):
+            first = max(rng[0], self.ind[s])
+            last = min(rng[1], self.ind[s+1])
+            h, w = divmod(s, self.nw)
+            res.append((h, w, (first, last)))
+        return res
+
+    def comp_partly_covered_parts(self, rng:tuple):
+        s1 = np.searchsorted(self.ind, rng[0], 'right') - 1
+        s2 = np.searchsorted(self.ind, rng[1], 'left')
+        res = []
+        if self.ind[s1] != rng[0]:
+            h, w = divmod(s1, self.nw)
+            res.append((h, w, (rng[0])))
+        if self.ind[s2] != rng[1]:
+            h, w = divmod(s1, self.nw)
+            res.append((h, w, (rng[1])))
+        return res
 
 
 class Shaper1D_interleave(Shaper):
@@ -199,4 +240,67 @@ class Shaper2D(Shaper):
             wid -= 1
         return hid, wid
 
+    def comp_covered_parts(self, box:tuple):
+        h1 = np.searchsorted(self.indh, box[0], 'right') - 1
+        w1 = np.searchsorted(self.indw, box[1], 'right') - 1
+        # h2 and w2 use left mode because box[2] and box[3] are one-after-the-last
+        h2 = np.searchsorted(self.indh, box[2], 'left')
+        w2 = np.searchsorted(self.indw, box[3], 'left')
+        res = []
+        for h in range(h1, h2):
+            th1 = self.indh[h]
+            th2 = self.indh[h+1]
+            top = max(box[0], th1)
+            bottom = min(box[2], th2)
+            for w in range(w1, w2):
+                tw1 = self.indw[w]
+                tw2 = self.indw[w+1]
+                left = max(box[1], tw1)
+                right = min(box[3], tw2)
+                if top<bottom and left<right:
+                    res.append((h, w, (top, left, bottom, right)))
+        return res
 
+    def comp_partly_covered_parts(self, box:tuple):
+        h1 = np.searchsorted(self.indh, box[0], 'right') - 1
+        w1 = np.searchsorted(self.indw, box[1], 'right') - 1
+        h2 = np.searchsorted(self.indh, box[2], 'left')
+        w2 = np.searchsorted(self.indw, box[3], 'left')
+        top = self.indh[h1] != box[0]
+        left = self.indw[w1] != box[1]
+        bottom = self.indh[h2] != box[2]
+        right = self.indw[w2] != box[3]
+        res = []
+        # top line
+        if top:
+            th1 = box[0]
+            th2 = min(box[2], self.indh[h1+1])
+            for w in range(w1+(0 if left else 1), w2-(0 if right else 1)):
+                tw1 = max(box[1], self.indw[w])
+                tw2 = min(box[3], self.indw[w+1])
+                res.append((h1, w, (th1, tw1, th2, tw2)))
+        # middle lines
+        if left or right:
+            if left:
+                tw1_l = max(box[1], self.indw[w1])
+                tw2_l = min(box[3], self.indw[w1+1])
+            if right:
+                tw1_r = max(box[1], self.indw[w2-1])
+                tw2_r = min(box[3], self.indw[w2])
+            for h in range(h1+1, h2):
+                th1 = max(box[0], self.indh[h])
+                th2 = min(box[2], self.indh[h+1])
+                if left:
+                    res.append((h, w1, (th1, tw1_l, th2, tw2_l)))
+                if right:
+                    res.append((h, w2-1, (th1, tw1_r, th2, tw2_r)))
+        # bottom line
+        if bottom:
+            th1 = max(box[0], self.indh[h2-1])
+            th2 = box[2]
+            for w in range(w1+(0 if left else 1), w2-(0 if right else 1)):
+                tw1 = max(box[1], self.indw[w])
+                tw2 = min(box[3], self.indw[w+1])
+                res.append((h2-1, w, (th1, tw1, th2, tw2)))
+
+        return res
