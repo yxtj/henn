@@ -60,7 +60,7 @@ class Conv2dConf():
         px = 0 if padded else self.padding[0]
         py = 0 if padded else self.padding[1]
         cx, rx = divmod(px+ix, self.stride[0])
-        cy, ry = divmod(py+iy, self.stride[0])
+        cy, ry = divmod(py+iy, self.stride[1])
         if rx == 0 and ry == 0:
             return cx, cy
         else:
@@ -197,3 +197,23 @@ def conv2d_v2(x, conf:Conv2dConf, weight, bias, doPad=True):
     #out = [conv2d_channel(x, ch, conf, weight, bias) for ch in range(conf.out_ch)]
     #out = np.concatenate(out)
     return out
+
+
+# %% box operations:
+
+def box_overlap(a:tuple, b:tuple):
+    """
+    <a> and <b> are 4-d vectors representing the top, left, bottom, right
+      coordinate of a 2-d box. <bottom> and <right> are one-after-the-last pixel.
+    Returns the coordinate of their overlapped box. If no overlap, return None.
+    """
+    top = max(a[0], b[0])
+    left = max(a[1], b[1])
+    bottom = min(a[2], b[2])
+    right = min(a[3], b[3])
+    if top >= bottom or left >= right:
+        return None
+    else:
+        return (top, left, bottom, right)
+
+
