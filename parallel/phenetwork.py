@@ -225,8 +225,10 @@ class PhenConv(PhenLayer):
     def _calc_expected_in_box_(self, hid, wid):
         iul = self.ishaper.get_offset(hid, wid)
         s = self.ishaper.get_shape(hid, wid)
-        ilr = (iul[0] + s[0] + self.conf.kernel_size[0] - 1,
-               iul[1] + s[1] + self.conf.kernel_size[1] - 1)
+        ilr = (min(iul[0] + s[0] + self.conf.kernel_size[0] - 1,
+                   self.ishaper.gshape[0]),
+               min(iul[1] + s[1] + self.conf.kernel_size[1] - 1,
+                   self.ishaper.gshape[1]))
         return (*iul, *ilr)
 
     def _calc_expected_out_box_(self, hid, wid):
@@ -236,11 +238,11 @@ class PhenConv(PhenLayer):
         return (*oul, *olr)
 
     def _calc_computed_out_box_(self, hid, wid):
-        iul = self.ishaper.get_offset(hid, wid)
-        s = self.ishaper.get_shape(hid, wid)
-        ilr = (iul[0] + s[0], iul[1] + s[1])
-        oul = self.conf.comp_out_coord(iul[0], iul[1], True)
-        olr = self.conf.comp_out_coord(ilr[0], ilr[1], True)
+        itop, ileft, idown, iright = self._calc_expected_in_box_(hid, wid)
+        idown -= self.conf.kernel_size[0] - 1
+        iright -= self.conf.kernel_size[0] - 1
+        oul = self.conf.comp_out_coord(itop, ileft, True)
+        olr = self.conf.comp_out_coord(idown, iright, True)
         return (*oul, *olr)
 
     # depend for Conv: copy dependent data
@@ -252,12 +254,12 @@ class PhenConv(PhenLayer):
         if self.hid > 0:
             hneed, wneed = self._calc_depend_hw_(self.hid-1, self.wid)
             if hneed > 0:
-                res.append(self.hid - 1, self.wid, (hneed, w))
+                res.append((self.hid - 1, self.wid, (hneed, w)))
         # left
         if self.wid > 0:
             hneed, wneed = self._calc_depend_hw_(self.hid, self.wid-1)
             if hneed > 0:
-                res.append(self.hid, self.wid - 1, (h, wneed))
+                res.append((self.hid, self.wid - 1, (h, wneed)))
         # upper left
         if self.hid > 0 and self.wid > 0:
             hneed, wneed = self._calc_depend_hw_(self.hid-1, self.wid-1)
@@ -273,7 +275,7 @@ class PhenConv(PhenLayer):
         if self.wid + 1 < self.nw and wneed > 0:
             res.append((self.hid, self.wid + 1, (h, wneed)))
         # lower
-        if self.hid + 1 < self.nh-1 and hneed > 0:
+        if self.hid + 1 < self.nh and hneed > 0:
             res.append((self.hid + 1, self.wid, (hneed, w)))
         # lower right
         if self.hid +1 < self.nh and self.wid + 1 < self.nw:
@@ -282,8 +284,9 @@ class PhenConv(PhenLayer):
         return res
 
     def depend_message(self, x:np.ndarray, tgt_hid:int, tgt_wid:int, desc):
-        assert 0 <= tgt_hid < self.nh and tgt_hid != self.hid
-        assert 0 <= tgt_wid < self.nw and tgt_wid != self.wid
+        assert 0 <= tgt_hid < self.nh
+        assert 0 <= tgt_wid < self.nw
+        assert tgt_hid != self.hid or tgt_wid != self.wid
         hneed, wneed = desc
         return x[:, :hneed, :wneed]
         if tgt_hid == self.hid-1 and tgt_wid == self.wid-1:
@@ -300,6 +303,8 @@ class PhenConv(PhenLayer):
         return None
 
     def depend_merge(self, xlocal:np.ndarray, xlist:list):
+        if len(xlist) == 0:
+            return xlocal
         h = 2 if self.hid != self.nh-1 else 1
         w = 2 if self.wid != self.nw-1 else 1
         xmat = np.empty((h, w), dtype=np.ndarray)
@@ -308,9 +313,8 @@ class PhenConv(PhenLayer):
             offh = hid - self.hid
             offw = wid - self.wid
             xmat[offh, offw] = xr
-        xmat = np.ndarray(xmat) # turn into 3D
         res = np.concatenate(
-            [ np.concatenate(xmat[i,:],2) for i in range(self.nw) ], 1)
+            [ np.concatenate(xmat[i,:],2) for i in range(h) ], 1)
         return res
 
     def local_forward(self, x:np.ndarray):
@@ -324,78 +328,63 @@ class PhenConv(PhenLayer):
     # join of Conv: balance the output
 
     def join_out(self, x:np.ndarray):
-        expected = self._calc_expected_out_box_(self.hid, self.wid)
-        computed = self._calc_computed_out_box_(self.hid, self.wid)
+        box = self._calc_computed_out_box_(self.hid, self.wid)
+        overlaps = self.oshaper.comp_covered_parts(box)
         res = []
-        eup, elf, edw, ert = expected
-        cup, clf, cdw, crt = computed
-        # up - 3
-        if cup < eup:
-            up_n = eup - cup
-            # up
-            res.append((self.hid-1, self.wid, (up_n, min(crt, ert) - max(clf, elf))))
-            # up left
-            if clf < elf:
-                res.append((self.hid-1, self.wid-1, (up_n, elf - clf)))
-            # up right
-            if crt > ert:
-                res.append((self.hid-1, self.wid+1, (up_n, crt - ert)))
-        # left
-        if clf < elf:
-            res.append((self.hid, self.wid-1, (cdw - max(cup, eup), elf - clf)))
-        # right
-        if crt > ert:
-            res.append((self.hid, self.wid+1, (cdw - max(cup, eup), crt - ert)))
-        # down - 3
-        if cdw > edw:
-            dw_n = cdw - edw
-            # down
-            res.append((self.hid+1, self.wid, (dw_n, min(crt, ert) - max(clf, elf))))
-            # down left
-            if clf < elf:
-                res.append((self.hid+1, self.wid-1, (dw_n, elf - clf)))
-            # down right
-            if crt > ert:
-                res.append((self.hid+1, self.wid+1, (dw_n, crt - ert)))
+        for h, w, desc in overlaps:
+            if h == self.hid and w == self.wid:
+                pass
+            else:
+                res.append((h, w, desc))
         return res
 
     def join_in(self, x:np.ndarray):
-        expected = self._calc_expected_out_box_(self.hid, self.wid)
-        computed = self._calc_computed_out_box_(self.hid, self.wid)
+        box = self._calc_computed_out_box_(self.hid, self.wid)
+        overlaps = self.oshaper.comp_partly_covered_parts(box)
         res = []
-        eup, elf, edw, ert = expected
-        cup, clf, cdw, crt = computed
-        _, h, w = x.shape
-        # up - 3
-        if cup > eup:
-            up_n = cup - eup
-            res.append((self.hid-1, self.wid, (up_n, w)))
-            if clf > elf:
-                res.append((self.hid-1, self.wid-1, (up_n, clf - elf)))
-            if crt < ert:
-                res.append((self.hid-1, self.wid+1, (up_n, ert - crt)))
-        # left
-        if clf > elf:
-            res.append((self.hid, self.wid-1, (h, clf - elf)))
-        # right
-        if crt < ert:
-            res.append((self.hid, self.wid+1, (h, ert - crt)))
-        # down - 3
-        if cdw < edw:
-            dw_n = edw - cdw
-            res.append((self.hid+1, self.wid, (dw_n, w)))
-            if clf > elf:
-                res.append((self.hid+1, self.wid-1, (dw_n, clf - elf)))
-            if crt < ert:
-                res.append((self.hid+1, self.wid+1, (dw_n, ert - crt)))
+        for h, w, desc in overlaps:
+            if h == self.hid and w == self.wid:
+                pass
+            else:
+                res.append((h, w, desc))
         return res
 
     def join_message(self, x:np.ndarray, tgt_hid, tgt_wid, desc):
-        h, w = desc
-        return x[:, :h, :w]
+        offset = self.oshaper.get_offset(self.hid, self.wid)
+        h1 = desc[0] - offset[0]
+        h2 = desc[2] - offset[0]
+        w1 = desc[1] - offset[1]
+        w2 = desc[3] - offset[1]
+        return x[:, h1:h2, w1:w2]
 
     def join_merge(self, xlocal:np.ndarray, xlist:list):
-        return xlocal
+        box = self._calc_computed_out_box_(self.hid, self.wid)
+        overlaps = self.oshaper.comp_covered_parts(box)
+        olocal = list(filter(lambda hwd: hwd[0]==self.hid and hwd[1]==self.wid,
+                             overlaps))
+        if len(olocal) == 1:
+            h1, w1, h2, w2 = olocal[0][2]
+        if len(xlist) == 0:
+            return xlocal[:, h1:h2, w1:w2]
+        # make xmat
+        hw = np.array([(h,w) for h, w, _ in xlist])
+        hmin, wmin = hw.min(0)
+        hmax, wmax = hw.max(0)
+        nh = hmax - hmin
+        nw = wmax - wmin
+        assert len(olocal) + len(xlist) == nh*nw
+        xmat = np.empty((nh, nw), dtype=np.ndarray)
+        # put remote data
+        for h, w, data in xlist:
+            xmat[h - hmin, w - wmin] = data
+        # put local data
+        if len(olocal) == 1:
+            h1, w1, h2, w2 = olocal[0][2]
+            xmat[self.hid-hmin, self.wid-wmin] = xlocal[:, h1:h2, w1:w2]
+        # merge data
+        res = np.concatenate(
+            [ np.concatenate(xmat[i,:],2) for i in range(self.nw) ], 1)
+        return res
 
     def global_result(self, xmat:np.ndarray):
         assert xmat.ndim == 2
