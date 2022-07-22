@@ -11,15 +11,25 @@ import hennlayer_torch as hnt
 import heutil
 import computil
 
+from collections import defaultdict
 
-def compute_model_shape(model: list[pn.PhenLayer], inshape: tuple):
+
+def compute_model_meta(nh:int, nw:int, model:list[pn.PhenLayer], inshape:tuple):
+    gshapes = [ inshape ]
+    shapers = [ make_shaper(nh, nw, min(2, len(inshape)), inshape) ]
+    layer_types = []
     s = inshape
-    res = []
-    res.append(s)
-    for layer in model:
-        s = layer.out_shape(s)
-        res.append(s)
-    return res
+    for lyr in model:
+        s = lyr.out_shape(s)
+        gshapes.append(s)
+        t = lyr.ltype
+        layer_types.append(t)
+        if t == "conv":
+            ss = make_shaper(nh, nw, 2, s)
+        else:
+            ss = make_shaper(nh, nw, 1, s)
+        shapers.append(ss)
+    return gshapes, shapers, layer_types
 
 
 # %% connection
@@ -63,6 +73,74 @@ def connect_linear_linear(nh, nw):
     print(f"Model {nh}x{nw} of linear-linear: correct:",
           np.all(np.abs(diff) < 1e-4))
     print("  difference:", diff)
+
+
+def connect_conv_conv(nh, nw):
+    inshape = (1, 10, 10)
+
+    conv1_t = nn.Conv2d(1, 3, 5)
+    conv2_t  = nn.Conv2d(3, 2, 3)
+    model_t = nn.Sequential(conv1_t, conv2_t)
+    conv1_h = hnt.make_conv2d(conv1_t)
+    conv2_h = hnt.make_conv2d(conv2_t)
+
+    conv1_p = [[pn.PhenConv(nh, nw, hid, wid, conv1_h) for wid in range(nw)]
+               for hid in range(nh)]
+    conv2_p = [[pn.PhenConv(nh, nw, hid, wid, conv2_h) for wid in range(nw)]
+               for hid in range(nh)]
+    model_p = [[[conv1_p[hid][wid], conv2_p[hid][wid]]
+               for wid in range(nw)]
+               for hid in range(nh)]
+
+    #gshapes = [inshape, (3, 6, 6), (2, 4, 4)]
+    #layer_types = ["conv", "conv"]
+    gshapes, shapers, layer_types = compute_model_meta(nh, nw, model_p[0][0], inshape)
+    print(gshapes)
+    print(shapers)
+    print(layer_types)
+
+    for hid in range(nh):
+        for wid in range(nw):
+            for lid in range(len(model_t)):
+                model_p[hid][wid][lid].bind_in_model(shapers[lid], shapers[lid+1],
+                                                     lid, gshapes, layer_types)
+
+    diff = []
+    for i in range(10):
+        x = torch.rand(inshape)
+        #ot = model_t(x.unsqueeze(0))[0].detach().numpy()
+        o = conv1_t(x.unsqueeze(0))
+        ot1 = o[0].detach().numpy()
+        o = conv2_t(o)
+        ot = o[0].detach().numpy()
+        # parallel
+        xp = x.numpy()
+        # layer 1
+        ops1 = np.empty((nh, nw), dtype=np.ndarray)
+        for hid in range(nh):
+            for wid in range(nw):
+                m = model_p[hid][wid][0]
+                box = m._calc_expected_in_box_(hid, wid)
+                cut = xp[:, box[0]:box[2], box[1]:box[3]]
+                ops1[hid, wid] = m.local_forward(cut)
+        #print([o.shape for o in ops1.ravel()])
+        op1 = model_p[0][0][0].global_result(ops1)
+        d1 = np.abs(ot1-op1).mean()
+        # layer 2
+        ops2 = np.empty((nh, nw), dtype=np.ndarray)
+        for hid in range(nh):
+            for wid in range(nw):
+                m = model_p[hid][wid][1]
+                box = m._calc_expected_in_box_(hid, wid)
+                cut = op1[:, box[0]:box[2], box[1]:box[3]]
+                ops2[hid, wid] = m.local_forward(cut)
+        #print([o.shape for o in ops3.ravel()])
+        op = model_p[0][0][1].global_result(ops2)
+        d = np.abs(ot-op).mean()
+        diff.append((d1,d))
+    print(f"Model {nh}x{nw} of conv-conv: correct:",
+          np.all(np.abs(diff) < 1e-4))
+    print("  difference:", np.array(diff))
 
 
 def connect_conv_linear(nh, nw):
@@ -148,7 +226,103 @@ def connect_conv_linear(nh, nw):
     print("  difference:", np.array(diff))
 
 
-def connect_conv_conv(nh, nw):
+# %% message-based layer connection
+
+def communicate_linear_linear(nh, nw):
+    inshape = 100
+    model_t = nn.Sequential(nn.Linear(inshape, 24), nn.Linear(24, 5))
+    model_h = [hnt.make_layer(layer) for layer in model_t]
+    def make_pmodel(hid, wid):
+        m = [pn.PhenLinear(nh, nw, hid, wid, model_h[0]),
+             pn.PhenLinear(nh, nw, hid, wid, model_h[1])]
+        return m
+    model_p = [[make_pmodel(hid, wid) for wid in range(nw)] for hid in range(nh)]
+
+    shaper1 = make_shaper(nh, nw, 1, (inshape,), interleave=True)
+    #shaper2 = make_shaper(nh, nw, 1, (24,), interleave=True)
+    #shaper3 = make_shaper(nh, nw, 1, (5,), interleave=True)
+    #shapers = [shaper1, shaper2, shaper3]
+
+    # gshapes = [(100,), (24,), (5,)]
+    gshapes, shapers, layer_types = compute_model_meta(nh, nw, model_p[0][0],
+                                                       (inshape,))
+    print(gshapes)
+    print(shapers)
+    print(layer_types)
+
+    for hid in range(nh):
+        for wid in range(nw):
+            for lid in range(len(model_t)):
+                model_p[hid][wid][lid].bind_in_model(shapers[lid], shapers[lid+1],
+                                                     lid, gshapes, layer_types)
+
+    diff = []
+    for i in range(10):
+        x = torch.rand(inshape)
+        o = model_t[0](x.unsqueeze(0))
+        ot1 = o[0].detach().numpy()
+        o = model_t[1](o)
+        ot = o[0].detach().numpy()
+        xp = x.numpy()
+        ips = np.empty((nh, nw), object)
+        for hid in range(nh):
+            for wid in range(nw):
+                ips[hid,wid] = shaper1.pick_data(hid, wid, xp)
+        # layer 1
+        ops = np.empty((nh, nw), object)
+        buffer = defaultdict(list)
+        for hid in range(nh):
+            for wid in range(nw):
+                m = model_p[hid][wid][0]
+                # compute
+                lo = m.local_forward(ips[hid][wid])
+                ops[hid, wid] = lo
+                # send
+                rqtgts = m.join_out(x)
+                for th, tw, desc in rqtgts:
+                    msg = m.join_message(lo, th, tw, desc)
+                    buffer[(th, tw)].append((hid, wid, msg))
+        # recv and join
+        for hid in range(nh):
+            for wid in range(nw):
+                m = model_p[hid][wid][0]
+                dep_s = m.join_in(ops[hid,wid])
+                dep_r = [(hid, wid) for hid, wid, d in buffer[(hid, wid)]]
+                assert dep_s == dep_r
+                ips[hid, wid] = m.join_merge(ops[hid, wid], buffer[(hid, wid)])
+        op1 = m.global_result(ips)
+        d1 = np.abs(ot1-op1).mean()
+        # layer 2
+        ops = np.empty((nh, nw), object)
+        buffer = defaultdict(list)
+        for hid in range(nh):
+            for wid in range(nw):
+                m = model_p[hid][wid][1]
+                # compute
+                lo = m.local_forward(ips[hid][wid])
+                ops[hid, wid] = lo
+                # send
+                rqtgts = m.join_out(x)
+                for th, tw, desc in rqtgts:
+                    msg = m.join_message(lo, th, tw, desc)
+                    buffer[(th, tw)].append((hid, wid, msg))
+        # recv and join
+        for hid in range(nh):
+            for wid in range(nw):
+                m = model_p[hid][wid][1]
+                dep_s = m.join_in(ops[hid,wid])
+                dep_r = [(hid, wid) for hid, wid, d in buffer[(hid, wid)]]
+                assert dep_s == dep_r
+                ops[hid, wid] = m.join_merge(ops[hid, wid], buffer[(hid, wid)])
+        op = m.global_result(ops)
+        d = np.abs(ot-op).mean()
+        diff.append((d1, d))
+    print(f"Model {nh}x{nw} of linear-linear: correct:",
+          np.all(np.abs(diff) < 1e-4))
+    print("  difference:", np.array(diff))
+
+
+def communicate_conv_conv(nh, nw):
     inshape = (1, 10, 10)
 
     conv1_t = nn.Conv2d(1, 3, 5)
@@ -167,17 +341,7 @@ def connect_conv_conv(nh, nw):
 
     #gshapes = [inshape, (3, 6, 6), (2, 4, 4)]
     #layer_types = ["conv", "conv"]
-    gshapes = [ inshape ]
-    shapers = [ make_shaper(nh, nw, 2, inshape) ]
-    layer_types = []
-    s = inshape
-    for lyr in model_p[0][0]:
-        s = lyr.out_shape(s)
-        gshapes.append(s)
-        ss = make_shaper(nh, nw, 2, s)
-        shapers.append(ss)
-        t = lyr.ltype
-        layer_types.append(t)
+    gshapes, shapers, layer_types = compute_model_meta(nh, nw, model_p[0][0], inshape)
     print(gshapes)
     print(shapers)
     print(layer_types)
@@ -196,45 +360,90 @@ def connect_conv_conv(nh, nw):
         ot1 = o[0].detach().numpy()
         o = conv2_t(o)
         ot = o[0].detach().numpy()
+        ots = [ot1, ot]
         # parallel
         xp = x.numpy()
-        # layer 1
-        ops1 = np.empty((nh, nw), dtype=np.ndarray)
+        ips = np.empty((nh, nw), dtype=np.ndarray)
         for hid in range(nh):
             for wid in range(nw):
-                m = model_p[hid][wid][0]
-                box = m._calc_expected_in_box_(hid, wid)
-                cut = xp[:, box[0]:box[2], box[1]:box[3]]
-                ops1[hid, wid] = m.local_forward(cut)
-        #print([o.shape for o in ops1.ravel()])
-        op1 = model_p[0][0][0].global_result(ops1)
-        d1 = np.abs(ot1-op1).mean()
-        # layer 2
-        ops2 = np.empty((nh, nw), dtype=np.ndarray)
-        for hid in range(nh):
-            for wid in range(nw):
-                m = model_p[hid][wid][1]
-                box = m._calc_expected_in_box_(hid, wid)
-                cut = op1[:, box[0]:box[2], box[1]:box[3]]
-                ops2[hid, wid] = m.local_forward(cut)
-        #print([o.shape for o in ops3.ravel()])
-        op = model_p[0][0][1].global_result(ops2)
-        d = np.abs(ot-op).mean()
-        diff.append((d1,d))
+                ips[hid, wid] = shapers[0].pick_data(hid, wid, xp)
+        ops = np.empty((nh, nw), dtype=np.ndarray)
+        d = []
+        for lid in range(2):
+            print("layer",lid)
+            # prepare
+            buffer = defaultdict(list)
+            for hid in range(nh):
+                for wid in range(nw):
+                    # send
+                    m = model_p[hid][wid][0]
+                    lx = ips[hid, wid]
+                    reqs = m.depend_out(lx)
+                    for th, tw, desc in reqs:
+                        msg = m.depend_message(lx, th, tw, desc)
+                        buffer[(th, tw)].append((hid, wid, msg))
+            # depend - recv and merge
+            for hid in range(nh):
+                for wid in range(nw):
+                    print(hid, wid)
+                    m = model_p[hid][wid][0]
+                    dep_s = [(h, w) for h, w, d in m.depend_in(ips[hid,wid])]
+                    dep_r = [(h, w) for h, w, d in buffer[(hid, wid)]]
+                    assert sorted(dep_s) == sorted(dep_r), f"s:{dep_s}, r:{dep_r}"
+                    lm = m.depend_merge(ips[(hid, wid)], buffer[(hid, wid)])
+                    ips[(hid, wid)] = lm
+            # compute
+            buffer = defaultdict(list)
+            for hid in range(nh):
+                for wid in range(nw):
+                    m = model_p[hid][wid][0]
+                    lo = m.local_forward(ips[hid][wid])
+                    ops[hid, wid] = lo
+                    # send
+                    reqs = m.join_out(lo)
+                    for th, tw, desc in reqs:
+                        msg = m.join_message(lo, th, tw, desc)
+                        buffer[(th, tw)].append((hid, wid, msg))
+            # join - recv and merge
+            for hid in range(nh):
+                for wid in range(nw):
+                    print(hid, wid)
+                    m = model_p[hid][wid][0]
+                    reqs = m.join_in(ops[hid,wid])
+                    dep_s = [(h, w) for h, w, d in reqs]
+                    dep_r = [(h, w) for h, w, d in buffer[(hid, wid)]]
+                    assert sorted(dep_s) == sorted(dep_r), f"s:{dep_s}, r:{dep_r}"
+                    ips[hid, wid] = m.join_merge(ops[hid, wid], buffer[(hid, wid)])
+            op = m.global_result(ips)
+            d.append(np.abs(ots[lid]-op).mean())
+        diff.append(d)
     print(f"Model {nh}x{nw} of conv-conv: correct:",
           np.all(np.abs(diff) < 1e-4))
     print("  difference:", np.array(diff))
 
-# %% complete model
+
+def communicate_conv_linear(nh, nw):
+    pass
 
 
 # %% main
 
-def main():
-    # connect different layers
-    #connect_linear_linear(2, 2)
-    #connect_conv_linear(2, 2)
+def test_connection():
+    connect_linear_linear(2, 2)
     connect_conv_conv(2, 2)
+    connect_conv_linear(2, 2)
+
+def test_message():
+    #communicate_linear_linear(2, 2)
+    communicate_conv_conv(2, 2)
+    #communicate_conv_linear(2, 2)
+
+def main():
+    # connect layers
+    #test_connection()
+
+    # message-based layer connection
+    test_message()
 
 
 if __name__ == "__main__":
