@@ -266,41 +266,40 @@ class Shaper2D(Shaper):
         w1 = np.searchsorted(self.indw, box[1], 'right') - 1
         h2 = np.searchsorted(self.indh, box[2], 'left')
         w2 = np.searchsorted(self.indw, box[3], 'left')
-        top = self.indh[h1] != box[0]
-        left = self.indw[w1] != box[1]
-        bottom = self.indh[h2] != box[2]
-        right = self.indw[w2] != box[3]
+        f_top = self.indh[h1] != box[0]
+        f_left = self.indw[w1] != box[1]
+        f_bottom = self.indh[h2] != box[2]
+        f_right = self.indw[w2] != box[3]
         res = []
         # top line
-        if top:
+        if f_top:
             th1 = box[0]
             th2 = min(box[2], self.indh[h1+1])
-            for w in range(w1+(0 if left else 1), w2-(0 if right else 1)):
+            for w in range(w1, w2):
                 tw1 = max(box[1], self.indw[w])
                 tw2 = min(box[3], self.indw[w+1])
                 res.append((h1, w, (th1, tw1, th2, tw2)))
         # middle lines
-        if left or right:
-            if left:
+        if f_left or f_right:
+            if f_left:
                 tw1_l = max(box[1], self.indw[w1])
                 tw2_l = min(box[3], self.indw[w1+1])
-            if right:
+            if f_right:
                 tw1_r = max(box[1], self.indw[w2-1])
                 tw2_r = min(box[3], self.indw[w2])
-            for h in range(h1+1, h2):
+            for h in range(h1+(1 if f_top else 0), h2-(1 if f_bottom else 0)):
                 th1 = max(box[0], self.indh[h])
                 th2 = min(box[2], self.indh[h+1])
-                if left:
+                if f_left:
                     res.append((h, w1, (th1, tw1_l, th2, tw2_l)))
-                if right:
+                if f_right:
                     res.append((h, w2-1, (th1, tw1_r, th2, tw2_r)))
         # bottom line
-        if bottom:
+        if f_bottom:
             th1 = max(box[0], self.indh[h2-1])
             th2 = box[2]
-            for w in range(w1+(0 if left else 1), w2-(0 if right else 1)):
+            for w in range(w1, w2):
                 tw1 = max(box[1], self.indw[w])
                 tw2 = min(box[3], self.indw[w+1])
                 res.append((h2-1, w, (th1, tw1, th2, tw2)))
-
         return res
