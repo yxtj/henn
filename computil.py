@@ -43,7 +43,10 @@ class Conv2dConf():
             assert bias.shape == (self.out_ch)
 
     def comp_out_size(self, sx:int, sy:int, padded:bool=False):
-        # <padded> means whether <sx> and <sy> already considered the padding pixels
+        '''
+        Compute the output size given the input size.
+        "padded" means whether "sx" and "sy" contain the padding pixels.
+        '''
         px = 0 if padded else 2*self.padding[0]
         py = 0 if padded else 2*self.padding[1]
         ox = (sx+px-self.kernel_size[0]) // self.stride[0] + 1
@@ -56,7 +59,7 @@ class Conv2dConf():
         #    oy = int(np.floor(oy))
         return ox, oy
 
-    def comp_out_coord(self, ix, iy, padded:bool=False):
+    def comp_out_coord(self, ix:int, iy:int, padded:bool=False):
         px = 0 if padded else self.padding[0]
         py = 0 if padded else self.padding[1]
         cx, rx = divmod(px+ix, self.stride[0])
@@ -65,6 +68,31 @@ class Conv2dConf():
             return cx, cy
         else:
             return None, None
+
+    def comp_in_size(self, sx:int, sy:int, with_pad:bool=False):
+        '''
+        Compute the input size given the output size.
+        When stride is not 1, returns the minimum input size.
+        "with_pad" controls wether the return size includes the padding pixels.
+        '''
+        isx = (sx-1)*self.stride[0] + self.kernel_size[0]
+        isy = (sy-1)*self.stride[1] + self.kernel_size[1]
+        if not with_pad:
+            isx -= 2*self.padding[0]
+            isy -= 2*self.padding[1]
+        return isx, isy
+
+    def comp_in_coord(self, ox:int, oy:int, with_pad:bool=False):
+        '''
+        Compute the corresponding input coordinate of the given output coordinate.
+        "with_pad" controls wether the return coordinate includes the padding pixels
+        '''
+        ix = ox*self.stride[0]
+        iy = oy*self.stride[1]
+        if not with_pad:
+            ix -= self.padding[0]
+            iy -= self.padding[1]
+        return ix, iy
 
 
 def conv2d(x, conf:Conv2dConf, weight, bias, doPad=True):
@@ -203,8 +231,8 @@ def conv2d_v2(x, conf:Conv2dConf, weight, bias, doPad=True):
 
 def box_overlap(a:tuple, b:tuple):
     """
-    <a> and <b> are 4-d vectors representing the top, left, bottom, right
-      coordinate of a 2-d box. <bottom> and <right> are one-after-the-last pixel.
+    "a" and "b" are 4-d vectors representing the top, left, bottom, right
+      coordinate of a 2-d box. "bottom" and "right" are one-after-the-last pixel.
     Returns the coordinate of their overlapped box. If no overlap, return None.
     """
     top = max(a[0], b[0])
