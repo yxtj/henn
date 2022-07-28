@@ -59,7 +59,7 @@ class PhenLayer():
         """
         Get list of (hid, wid, desc) for parts that DEPEND ON the data of this
           part. i.e. Return the parts to which this part SENDs message.
-        The <desc> attribute is feed to depend_message(), to avoid redundant
+        The "desc" attribute is feed to depend_message(), to avoid redundant
           computation. Its type and content may vary among different Layers.
         """
         return []
@@ -81,7 +81,7 @@ class PhenLayer():
     def depend_merge(self, xlocal:np.ndarray, xlist:list):
         """
         Merge the local data and dependent data (get by cross_message) for processing.
-        The <xlist> is a list of (hid, wid, data), where <data> is the result of
+        The "xlist" is a list of (hid, wid, data), where <data> is the result of
           depend_message() on part (hid, wid).
         """
         return xlocal
@@ -102,7 +102,7 @@ class PhenLayer():
         """
         Get list of (hid, wid) for parts whose data is partly hold by this part.
         i.e. Return the parts to which this part SENDs message.
-        The <desc> attribute is feed to join_message(), to avoid redundant
+        The "desc" attribute is feed to join_message(), to avoid redundant
           computation. Its type and content may vary among different Layers.
         """
         return []
@@ -124,7 +124,7 @@ class PhenLayer():
     def join_merge(self, xlocal:np.ndarray, xlist:list):
         """
         Merge and reshape the local data shard and received shards.
-        The <xlist> is a list of (hid, wid, data), where <data> is the result of
+        The "xlist" is a list of (hid, wid, data), where <data> is the result of
           join_message() on part (hid, wid).
         """
         return xlocal
@@ -135,7 +135,7 @@ class PhenLayer():
         """
         Merge local results of all parts and return the global result.
         Return the final result of this layer as if there is no parallelization.
-        <xmat> is np.ndarray of size (nh, nw) and its dtype is np.ndarray.
+        "xmat" is np.ndarray of size (nh, nw) and its dtype is np.ndarray.
         """
         raise NotImplementedError("The global_result function is not implemented")
 
@@ -152,7 +152,7 @@ class PhenLayer():
     def out_shape(self, inshape:tuple):
         """
         Get the expected shape of global output data, as a tuple,
-          given data as <inshape>.
+          given data as "inshape".
         """
         raise NotImplementedError("This function is not implemented")
 
@@ -161,20 +161,6 @@ class PhenLayer():
 
     def out_shape_local(self):
         self.oshaper.get_shape(self.hid, self.wid)
-
-    # helper function
-
-    def _merge_(self, xlocal, xlist, coord_local=(0,0), mat_shape=(2,2)):
-        xmat = np.empty(mat_shape, dtype=np.ndarray)
-        xmat[coord_local] = xlocal
-        for hid, wid, xr in xlist:
-            offh = hid - self.hid
-            offw = wid - self.wid
-            xmat[coord_local[0] + offh, coord_local[1] + offw] = xr
-        xmat = np.ndarray(xmat) # turn into 3D
-        res = np.concatenate(
-            [ np.concatenate(xmat[i,:],2) for i in range(self.nw) ], 1)
-        return res
 
 # %% convolution layer
 
@@ -203,7 +189,8 @@ class PhenConv(PhenLayer):
         # global coordinate of the upper left pixel (inclusive)
         self.gi_ul = self.ishaper.get_offset(self.hid, self.wid)
         # global coordinate of the lower right pixel (exclusive)
-        self.gi_lr = self.gi_ul + self.ishaper.get_shape(self.hid, self.wid)
+        s = self.ishaper.get_shape(self.hid, self.wid)
+        self.gi_lr = (self.gi_ul[0] + s[0], self.gi_ul[1] + s[1])
         # outputs:
         #self.go_ul = self.conf.comp_out_coord(self.gi_ul[0], self.gi_ul[1], True)
         #self.go_lr = self.conf.comp_out_coord(self.gi_lr[0], self.gi_lr[1], True)
@@ -215,7 +202,8 @@ class PhenConv(PhenLayer):
             lr = self.gi_lr
         else:
             ul = self.ishaper.get_offset(hid, wid)
-            lr = ul + self.ishaper.get_shape(hid, wid)
+            s = self.ishaper.get_shape(hid, wid)
+            lr = (ul[0] + s[0], ul[1] + s[1])
         last_h = (lr[0] // self.conf.stride[0])*self.conf.stride[0]
         last_w = (lr[1] // self.conf.stride[1])*self.conf.stride[1]
         hneed = max(0, last_h + self.conf.kernel_size[0] - 1 - lr[0])
@@ -223,13 +211,17 @@ class PhenConv(PhenLayer):
         return hneed, wneed
 
     def _calc_expected_in_box_(self, hid, wid):
-        iul = self.ishaper.get_offset(hid, wid)
-        s = self.ishaper.get_shape(hid, wid)
-        ilr = (min(iul[0] + s[0] + self.conf.kernel_size[0] - 1,
-                   self.ishaper.gshape[0]),
-               min(iul[1] + s[1] + self.conf.kernel_size[1] - 1,
-                   self.ishaper.gshape[1]))
-        return (*iul, *ilr)
+        ul = self.ishaper.get_offset(hid, wid)
+        if hid == self.hid and wid == wid:
+            lr = self.gi_lr
+        else:
+            s = self.ishaper.get_shape(hid, wid)
+            lr = (ul[0] + s[0], ul[1] + s[1])
+        last_h = (lr[0] // self.conf.stride[0])*self.conf.stride[0]
+        last_w = (lr[1] // self.conf.stride[1])*self.conf.stride[1]
+        lower = min(self.ishaper.gshape[0], last_h + self.conf.kernel_size[0] - 1)
+        right = min(self.ishaper.gshape[1], last_w + self.conf.kernel_size[1] - 1)
+        return (*ul, lower, right)
 
     def _calc_expected_out_box_(self, hid, wid):
         oul = self.oshaper.get_offset(hid, wid)
@@ -339,21 +331,28 @@ class PhenConv(PhenLayer):
         return res
 
     def join_in(self, x:np.ndarray):
-        box = self._calc_computed_out_box_(self.hid, self.wid)
-        overlaps = self.oshaper.comp_partly_covered_parts(box)
+        box = self._calc_expected_out_box_(self.hid, self.wid)
+        # compute which part holds the box
+        up, left = self.conf.comp_in_coord(box[0], box[1])
+        down, right = self.conf.comp_in_coord(box[2]-1, box[3]-1)
+        h1, w1 = self.ishaper.comp_part((up, left))
+        h2, w2 = self.ishaper.comp_part((down, right))
         res = []
-        for h, w, desc in overlaps:
-            if h == self.hid and w == self.wid:
-                pass
-            else:
-                res.append((h, w, desc))
+        for h in range(h1, h2+1):
+            for w in range(w1, w2+1):
+                if h != self.hid or w != self.wid:
+                    b = self._calc_computed_out_box_(h, w)
+                    desc = computil.box_overlap(box, b)
+                    res.append((h, w, desc))
         return res
 
     def join_message(self, x:np.ndarray, tgt_hid, tgt_wid, desc):
-        offset = self.oshaper.get_offset(self.hid, self.wid)
+        itop, ileft, idown, iright = self._calc_expected_in_box_(self.hid, self.wid)
+        offset = self.conf.comp_out_coord(itop, ileft, True)
+        #offset = self.oshaper.get_offset(self.hid, self.wid)
         h1 = desc[0] - offset[0]
-        h2 = desc[2] - offset[0]
         w1 = desc[1] - offset[1]
+        h2 = desc[2] - offset[0]
         w2 = desc[3] - offset[1]
         return x[:, h1:h2, w1:w2]
 
@@ -370,20 +369,21 @@ class PhenConv(PhenLayer):
         hw = np.array([(h,w) for h, w, _ in xlist])
         hmin, wmin = hw.min(0)
         hmax, wmax = hw.max(0)
-        nh = hmax - hmin
-        nw = wmax - wmin
-        assert len(olocal) + len(xlist) == nh*nw
+        nh = max(hmax, self.hid) - min(hmin, self.hid) + 1
+        nw = max(wmax, self.wid) - min(wmin, self.wid) + 1
+        assert len(olocal) + len(xlist) == nh*nw, \
+            "received data does not form a matrix: local:"+str(olocal)+"remote:"+\
+            str([(h,w,d.shape) for h,w,d in xlist])
         xmat = np.empty((nh, nw), dtype=np.ndarray)
         # put remote data
         for h, w, data in xlist:
             xmat[h - hmin, w - wmin] = data
         # put local data
         if len(olocal) == 1:
-            h1, w1, h2, w2 = olocal[0][2]
             xmat[self.hid-hmin, self.wid-wmin] = xlocal[:, h1:h2, w1:w2]
         # merge data
         res = np.concatenate(
-            [ np.concatenate(xmat[i,:],2) for i in range(self.nw) ], 1)
+            [ np.concatenate(xmat[i,:],2) for i in range(nh) ], 1)
         return res
 
     def global_result(self, xmat:np.ndarray):
@@ -391,7 +391,7 @@ class PhenConv(PhenLayer):
         assert xmat.shape == (self.nh, self.nw)
         assert xmat[0,0].shape[0] == self.conf.out_ch
         res = np.concatenate(
-            [ np.concatenate(xmat[i,:],2) for i in range(self.nw) ], 1)
+            [ np.concatenate(xmat[i,:],2) for i in range(self.nh) ], 1)
         return res
 
     def in_shape(self):
