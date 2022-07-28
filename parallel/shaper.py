@@ -41,7 +41,7 @@ class Shaper:
     def comp_covered_parts(self, rng:tuple):
         """
         Compute the parts covered by the input range <rng>.
-        <rng> is the range of all dimensions. Ranges are in close-open form.
+        "rng" is the range of all dimensions. Ranges are in L-close-R-open form.
             [d1_f, d2_f, ..., dk_f, d1_l, d2_l, ..., dk_l]
         Returns list of parts covered by <rng> and the covered ranges:
             (hid, wid, (d1_f, ..., dk_l))
@@ -228,31 +228,31 @@ class Shaper2D(Shaper):
         return off
 
     def comp_part(self, coord:tuple):
-        if isinstance(coord, tuple) and len(coord) == 2:
-            h, w = coord
-        else:
-            raise NotImplementedError("type of coord is not supported")
-        hid = h // self.nh
-        wid = w // self.nw
-        if self.indh[hid] > h:
-            hid -= 1
-        if self.indw[wid] > w:
-            wid -= 1
+        assert isinstance(coord, tuple) and len(coord) == 2, "<coord> should be a pair"
+        h, w = coord
+        hid = np.searchsorted(self.indh, h, 'right') - 1
+        wid = np.searchsorted(self.indw, w, 'right') - 1
         return hid, wid
+        #ph = self.indh[-1]/self.nh
+        #pw = self.indw[-1]/self.nw
+        #hid = h / ph
+        #wid = w / pw
+        #if self.indh[hid+1] == h:
+        #    hid += 1
+        #if self.indw[wid+1] == w:
+        #    wid += 1
+        #return hid, wid
 
     def comp_covered_parts(self, box:tuple):
-        h1 = np.searchsorted(self.indh, box[0], 'right') - 1
-        w1 = np.searchsorted(self.indw, box[1], 'right') - 1
-        # h2 and w2 use left mode because box[2] and box[3] are one-after-the-last
-        h2 = np.searchsorted(self.indh, box[2], 'left')
-        w2 = np.searchsorted(self.indw, box[3], 'left')
+        h1, h2 = np.searchsorted(self.indh, (box[0], box[2]-1), 'right') - 1
+        w1, w2 = np.searchsorted(self.indw, (box[1], box[3]-1), 'right') - 1
         res = []
-        for h in range(h1, h2):
+        for h in range(h1, h2+1):
             th1 = self.indh[h]
             th2 = self.indh[h+1]
             top = max(box[0], th1)
             bottom = min(box[2], th2)
-            for w in range(w1, w2):
+            for w in range(w1, w2+1):
                 tw1 = self.indw[w]
                 tw2 = self.indw[w+1]
                 left = max(box[1], tw1)
