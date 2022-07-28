@@ -112,7 +112,7 @@ def parallel_conv(nh=2, nw=2, ks=3, stride=1, pad=0, sz=10):
                 #print(hid, wid, 'h:',h1,h2,'w:',w1,w2, 'shape:', cut.shape)
                 o = conv.local_forward(cut)
                 ops[hid,wid] = o
-        op = np.concatenate([np.concatenate(ops[i,:],2) for i in range(nw)], 1)
+        op = np.concatenate([np.concatenate(ops[i,:],2) for i in range(nh)], 1)
         d = np.abs(ot-op).mean()
         diff.append(d)
     print(f"Parallel {nh}x{nw}: Conv kernel-{ks}, stride-{stride}, pad-{pad}, correct:", np.all(np.abs(diff)<1e-4))
