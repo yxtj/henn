@@ -380,7 +380,9 @@ class PhenConv(PhenLayer):
             xmat[h - hmin, w - wmin] = data
         # put local data
         if len(olocal) == 1:
-            xmat[self.hid-hmin, self.wid-wmin] = xlocal[:, h1:h2, w1:w2]
+            offh, offw = box[0], box[1]
+            d = xlocal[:, h1-offh:h2-offh, w1-offw:w2-offw]
+            xmat[self.hid-hmin, self.wid-wmin] = d
         # merge data
         res = np.concatenate(
             [ np.concatenate(xmat[i,:],2) for i in range(nh) ], 1)
