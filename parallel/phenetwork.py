@@ -455,17 +455,20 @@ class PhenLinear(PhenLayer):
         return r
 
     def join_out(self, x:np.ndarray):
-        return [(*divmod(i, self.nw), None) for i in range(self.npart)]
+        l = [(*divmod(i, self.nw), None) for i in range(self.npart) if i != self.pid]
+        return l
 
     def join_in(self, x:np.ndarray):
-        return [divmod(i, self.nw) for i in range(self.npart)]
+        l = [(*divmod(i, self.nw), None) for i in range(self.npart) if i != self.pid]
+        return l
 
     def join_message(self, x:np.ndarray, tgt_hid, tgt_wid, desc):
         m = self.oshaper.pick_data(tgt_hid, tgt_wid, x)
         return m
 
     def join_merge(self, xlocal:np.ndarray, xlist:list):
-        data = [d for hid, wid, d in xlist]
+        dl = self.oshaper.pick_data(self.hid, self.wid, xlocal)
+        data = [dl] + [d for hid, wid, d in xlist]
         r = heutil.hesum(data)
         return r
 
@@ -518,7 +521,7 @@ class PhenFlatten(PhenLayer):
         return None
 
     def out_shape(self, inshape:tuple):
-        assert len(inshape) == 1
+        assert len(inshape) != 1
         o = np.prod(inshape)
         return (o, )
 
