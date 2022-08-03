@@ -26,14 +26,17 @@ class Shaper:
     def get_meta(self, hid, wid):
         raise NotImplementedError("method get_meta is not implemented")
 
-    def pick_data(self, hid, wid, data:np.ndarray):
-        raise NotImplementedError("method pick_data is not implemented")
-
     def get_offset(self, hid, wid):
         raise NotImplementedError("method get_offset is not implemented")
 
+    def get_range(self, hid, wid):
+        raise NotImplementedError("method get_range is not implemented")
+
     def get_indexes(self, hid, wid):
         raise NotImplementedError("method get_indexes is not implemented")
+
+    def pick_data(self, hid, wid, data:np.ndarray):
+        raise NotImplementedError("method pick_data is not implemented")
 
     def comp_part(self, coord:tuple):
         raise NotImplementedError("method comp_part is not implemented")
@@ -44,7 +47,7 @@ class Shaper:
         "rng" is the range of all dimensions. Ranges are in L-close-R-open form.
             [d1_f, d2_f, ..., dk_f, d1_l, d2_l, ..., dk_l]
         Returns list of parts covered by <rng> and the covered ranges:
-            (hid, wid, (d1_f, ..., dk_l))
+            (hid, wid, (d1_f, ..., dk_f, d1_l, ..., dk_l))
         """
         raise NotImplementedError("method comp_covered_parts is not implemented")
 
@@ -91,20 +94,25 @@ class Shaper1D_consecutive(Shaper):
         i1, i2 = self.ind[sid], self.ind[sid+1]
         return i1, i2
 
-    def pick_data(self, hid, wid, data:np.ndarray):
-        assert data.ndim >= 1
-        sid = hid*self.nw + wid
-        i1, i2 = self.ind[sid], self.ind[sid+1]
-        return data[..., i1:i2]
-
     def get_offset(self, hid, wid):
         sid = hid*self.nw + wid
         return self.ind[sid]
+
+    def get_range(self, hid, wid):
+        sid = hid*self.nw + wid
+        i1, i2 = self.ind[sid], self.ind[sid+1]
+        return (i1, i2)
 
     def get_indexes(self, hid, wid):
         sid = hid*self.nw + wid
         i1, i2 = self.ind[sid], self.ind[sid+1]
         return np.arange(i1, i2)
+
+    def pick_data(self, hid, wid, data:np.ndarray):
+        assert data.ndim >= 1
+        sid = hid*self.nw + wid
+        i1, i2 = self.ind[sid], self.ind[sid+1]
+        return data[..., i1:i2]
 
     def comp_part(self, coord):
         if isinstance(coord, int):
@@ -164,11 +172,6 @@ class Shaper1D_interleave(Shaper):
         sid = hid*self.nw + wid
         return sid, self.npart
 
-    def pick_data(self, hid, wid, data:np.ndarray):
-        assert data.ndim >= 1
-        sid = hid*self.nw + wid
-        return data[..., sid::self.npart]
-
     def get_offset(self, hid, wid):
         sid = hid*self.nw + wid
         return self.ind[sid]
@@ -176,6 +179,11 @@ class Shaper1D_interleave(Shaper):
     def get_indexes(self, hid, wid):
         sid = hid*self.nw + wid
         return np.arange(sid, self.n, self.npart)
+
+    def pick_data(self, hid, wid, data:np.ndarray):
+        assert data.ndim >= 1
+        sid = hid*self.nw + wid
+        return data[..., sid::self.npart]
 
     def comp_part(self, coord):
         if isinstance(coord, int):
@@ -210,13 +218,13 @@ class Shaper2D(Shaper):
         w1, w2 = self.indw[wid], self.indw[wid+1]
         return h1, h2, w1, w2
 
-    def pick_data(self, hid, wid, data:np.ndarray):
-        assert data.ndim >= 2
-        h1, h2, w1, w2 = self.get_meta(hid, wid)
-        return data[..., h1:h2, w1:w2]
-
     def get_offset(self, hid, wid):
         return (self.indh[hid], self.indw[wid])
+
+    def get_range(self, hid, wid):
+        h1, h2 = self.indh[hid], self.indh[hid+1]
+        w1, w2 = self.indw[wid], self.indw[wid+1]
+        return (h1, w1, h2, w2)
 
     def get_indexes(self, hid, wid):
         h1, h2, w1, w2 = self.get_meta(hid, wid)
@@ -226,6 +234,11 @@ class Shaper2D(Shaper):
         for i in range(h):
             off[i,:] = (h1+i)*self.nw + np.arange(w1, w2)
         return off
+
+    def pick_data(self, hid, wid, data:np.ndarray):
+        assert data.ndim >= 2
+        h1, h2, w1, w2 = self.get_meta(hid, wid)
+        return data[..., h1:h2, w1:w2]
 
     def comp_part(self, coord:tuple):
         assert isinstance(coord, tuple) and len(coord) == 2, "<coord> should be a pair"
