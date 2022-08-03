@@ -372,48 +372,54 @@ def communicate_conv_conv(nh, nw):
         for lid in range(2):
             print("layer",lid)
             # prepare
+            print("prepare")
             buffer = defaultdict(list)
             for hid in range(nh):
                 for wid in range(nw):
                     # send
-                    m = model_p[hid][wid][0]
+                    m = model_p[hid][wid][lid]
                     lx = ips[hid, wid]
                     reqs = m.depend_out(lx)
                     for th, tw, desc in reqs:
                         msg = m.depend_message(lx, th, tw, desc)
                         buffer[(th, tw)].append((hid, wid, msg))
+            print("prepare-merge")
             # depend - recv and merge
             for hid in range(nh):
                 for wid in range(nw):
                     print(hid, wid)
-                    m = model_p[hid][wid][0]
+                    m = model_p[hid][wid][lid]
                     dep_s = [(h, w) for h, w, d in m.depend_in(ips[hid,wid])]
                     dep_r = [(h, w) for h, w, d in buffer[(hid, wid)]]
                     assert sorted(dep_s) == sorted(dep_r), f"s:{dep_s}, r:{dep_r}"
                     lm = m.depend_merge(ips[(hid, wid)], buffer[(hid, wid)])
                     ips[(hid, wid)] = lm
             # compute
+            print("compute")
             buffer = defaultdict(list)
             for hid in range(nh):
                 for wid in range(nw):
-                    m = model_p[hid][wid][0]
+                    m = model_p[hid][wid][lid]
                     lo = m.local_forward(ips[hid][wid])
                     ops[hid, wid] = lo
                     # send
                     reqs = m.join_out(lo)
+                    print(hid, wid, lo.shape, reqs)
                     for th, tw, desc in reqs:
                         msg = m.join_message(lo, th, tw, desc)
                         buffer[(th, tw)].append((hid, wid, msg))
             # join - recv and merge
+            print("join")
             for hid in range(nh):
                 for wid in range(nw):
-                    print(hid, wid)
-                    m = model_p[hid][wid][0]
+                    m = model_p[hid][wid][lid]
                     reqs = m.join_in(ops[hid,wid])
+                    print(hid, wid, reqs)
                     dep_s = [(h, w) for h, w, d in reqs]
                     dep_r = [(h, w) for h, w, d in buffer[(hid, wid)]]
                     assert sorted(dep_s) == sorted(dep_r), f"s:{dep_s}, r:{dep_r}"
                     ips[hid, wid] = m.join_merge(ops[hid, wid], buffer[(hid, wid)])
+                    print(m.oshaper.get_shape(hid, wid), ips[hid, wid].shape)
             op = m.global_result(ips)
             d.append(np.abs(ots[lid]-op).mean())
         diff.append(d)
@@ -435,7 +441,8 @@ def test_connection():
 
 def test_message():
     #communicate_linear_linear(2, 2)
-    communicate_conv_conv(2, 2)
+    #communicate_conv_conv(2, 2)
+    communicate_conv_conv(4, 3)
     #communicate_conv_linear(2, 2)
 
 def main():

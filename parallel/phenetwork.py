@@ -187,10 +187,10 @@ class PhenConv(PhenLayer):
         super().bind_in_model(ishaper, oshaper, idx, gshapes, layer_types)
         # inputs:
         # global coordinate of the upper left pixel (inclusive)
-        self.gi_ul = self.ishaper.get_offset(self.hid, self.wid)
+        inbox = self.ishaper.get_range(self.hid, self.wid)
+        self.gi_ul = (inbox[0], inbox[1])
         # global coordinate of the lower right pixel (exclusive)
-        s = self.ishaper.get_shape(self.hid, self.wid)
-        self.gi_lr = (self.gi_ul[0] + s[0], self.gi_ul[1] + s[1])
+        self.gi_lr = (inbox[2], inbox[3])
         # outputs:
         #self.go_ul = self.conf.comp_out_coord(self.gi_ul[0], self.gi_ul[1], True)
         #self.go_lr = self.conf.comp_out_coord(self.gi_lr[0], self.gi_lr[1], True)
@@ -198,23 +198,24 @@ class PhenConv(PhenLayer):
     # helpers
 
     def _calc_depend_hw_(self, hid, wid):
-        if hid == self.hid and wid == wid:
+        if hid == self.hid and self.wid == wid:
             lr = self.gi_lr
         else:
             ul = self.ishaper.get_offset(hid, wid)
             s = self.ishaper.get_shape(hid, wid)
             lr = (ul[0] + s[0], ul[1] + s[1])
-        last_h = (lr[0] // self.conf.stride[0])*self.conf.stride[0]
-        last_w = (lr[1] // self.conf.stride[1])*self.conf.stride[1]
+        last_h = lr[0] - (lr[0] % self.conf.stride[0])
+        last_w = lr[1] - (lr[1] % self.conf.stride[1])
         hneed = max(0, last_h + self.conf.kernel_size[0] - 1 - lr[0])
         wneed = max(0, last_w + self.conf.kernel_size[1] - 1 - lr[1])
         return hneed, wneed
 
     def _calc_expected_in_box_(self, hid, wid):
-        ul = self.ishaper.get_offset(hid, wid)
-        if hid == self.hid and wid == wid:
+        if hid == self.hid and wid == self.wid:
+            ul = self.gi_ul
             lr = self.gi_lr
         else:
+            ul = self.ishaper.get_offset(hid, wid)
             s = self.ishaper.get_shape(hid, wid)
             lr = (ul[0] + s[0], ul[1] + s[1])
         last_h = (lr[0] // self.conf.stride[0])*self.conf.stride[0]
@@ -240,78 +241,70 @@ class PhenConv(PhenLayer):
     # depend for Conv: copy dependent data
 
     def depend_out(self, x:np.ndarray):
+        box = self.ishaper.get_range(self.hid, self.wid)
+        offh, offw = box[0], box[1]
+        dp_u = max(0, box[0] - self.conf.kernel_size[0] + 1)
+        dp_l = max(0, box[1] - self.conf.kernel_size[1] + 1)
+        # dp_down and dp_right are inclusive
+        #dp_d = max(1, box[2] - self.conf.kernel_size[0])
+        #dp_r = max(1, box[3] - self.conf.kernel_size[1])
+        h1, w1 = self.ishaper.comp_part((dp_u, dp_l))
+        #h2, w2 = self.ishaper.comp_part((dp_d, dp_r))
+        h2, w2 = self.hid, self.wid
         res = []
-        _, h, w = x.shape
-        # upper
-        if self.hid > 0:
-            hneed, wneed = self._calc_depend_hw_(self.hid-1, self.wid)
-            if hneed > 0:
-                res.append((self.hid - 1, self.wid, (hneed, w)))
-        # left
-        if self.wid > 0:
-            hneed, wneed = self._calc_depend_hw_(self.hid, self.wid-1)
-            if hneed > 0:
-                res.append((self.hid, self.wid - 1, (h, wneed)))
-        # upper left
-        if self.hid > 0 and self.wid > 0:
-            hneed, wneed = self._calc_depend_hw_(self.hid-1, self.wid-1)
-            if hneed > 0 and wneed > 0:
-                res.append((self.hid - 1, self.wid - 1, (hneed, wneed)))
+        for h in range(h1, h2+1):
+            for w in range(w1, w2+1):
+                if h != self.hid or w != self.wid:
+                    b = self._calc_expected_in_box_(h, w)
+                    o = computil.box_overlap(box, b)
+                    desc = (o[0]-offh, o[1]-offw, o[2]-offh, o[3]-offw)
+                    res.append((h, w, desc))
         return res
 
     def depend_in(self, x:np.ndarray):
+        box = self._calc_expected_in_box_(self.hid, self.wid)
+        overlaps = self.ishaper.comp_covered_parts(box)
         res = []
-        _, h, w = x.shape
-        hneed, wneed = self._calc_depend_hw_(self.hid, self.wid)
-        # right
-        if self.wid + 1 < self.nw and wneed > 0:
-            res.append((self.hid, self.wid + 1, (h, wneed)))
-        # lower
-        if self.hid + 1 < self.nh and hneed > 0:
-            res.append((self.hid + 1, self.wid, (hneed, w)))
-        # lower right
-        if self.hid +1 < self.nh and self.wid + 1 < self.nw:
-            if hneed > 0 and wneed > 0:
-                res.append((self.hid + 1, self.wid + 1, (hneed, wneed)))
+        for h, w, d in overlaps:
+            if h != self.hid or w != self.wid:
+                b = self.ishaper.get_range(h, w)
+                desc = computil.box_overlap(box, b)
+                res.append((h, w, desc))
         return res
 
     def depend_message(self, x:np.ndarray, tgt_hid:int, tgt_wid:int, desc):
         assert 0 <= tgt_hid < self.nh
         assert 0 <= tgt_wid < self.nw
         assert tgt_hid != self.hid or tgt_wid != self.wid
-        hneed, wneed = desc
-        return x[:, :hneed, :wneed]
-        if tgt_hid == self.hid-1 and tgt_wid == self.wid-1:
-            # upper left
-            return x[:, :hneed, :wneed]
-        elif tgt_hid == self.hid and tgt_wid == self.wid-1:
-            # left
-            #assert desc[0] == x.shape[1]
-            return x[:, :, :wneed]
-        elif tgt_hid == self.hid-1 and tgt_wid == self.wid:
-            # upper
-            #assert desc[1] == x.shape[2]
-            return x[:, :hneed, :]
-        return None
+        h1, w1, h2, w2 = desc
+        return x[:, h1:h2, w1:w2]
 
     def depend_merge(self, xlocal:np.ndarray, xlist:list):
         if len(xlist) == 0:
             return xlocal
-        h = 2 if self.hid != self.nh-1 else 1
-        w = 2 if self.wid != self.nw-1 else 1
-        xmat = np.empty((h, w), dtype=np.ndarray)
-        xmat[0][0] = xlocal
-        for hid, wid, xr in xlist:
-            offh = hid - self.hid
-            offw = wid - self.wid
-            xmat[offh, offw] = xr
+        # make xmat
+        hw = np.array([(h,w) for h, w, _ in xlist])
+        hmin, wmin = self.hid, self.wid
+        hmax, wmax = hw.max(0)
+        nh = hmax - hmin + 1
+        nw = wmax - wmin + 1
+        assert 1 + len(xlist) == nh*nw, \
+            "received data does not form a matrix: local:"+str(xlocal.shape)+\
+            " remote:"+str([(h,w,d.shape) for h,w,d in xlist])
+        xmat = np.empty((nh, nw), dtype=np.ndarray)
+        # put local data
+        xmat[0,0] = xlocal
+        # put remote data
+        for h, w, data in xlist:
+            xmat[h - hmin, w - wmin] = data
+        # merge data
         res = np.concatenate(
-            [ np.concatenate(xmat[i,:],2) for i in range(h) ], 1)
+            [ np.concatenate(xmat[i,:],2) for i in range(nh) ], 1)
         return res
 
     def local_forward(self, x:np.ndarray):
         # padding
-        if self.conf.padding != 0:
+        if self.conf.padding != (0, 0):
             x = computil.pad_data(x, self.conf.padding, self.wid==0, self.hid==0,
                                   self.wid==self.nw-1, self.hid==self.nh-1)
         # convolute
@@ -369,10 +362,14 @@ class PhenConv(PhenLayer):
         hw = np.array([(h,w) for h, w, _ in xlist])
         hmin, wmin = hw.min(0)
         hmax, wmax = hw.max(0)
-        nh = max(hmax, self.hid) - min(hmin, self.hid) + 1
-        nw = max(wmax, self.wid) - min(wmin, self.wid) + 1
+        if len(olocal) != 0:
+            nh = max(hmax, self.hid) - min(hmin, self.hid) + 1
+            nw = max(wmax, self.wid) - min(wmin, self.wid) + 1
+        else:
+            nh = hmax - hmin + 1
+            nw = wmax - wmin + 1
         assert len(olocal) + len(xlist) == nh*nw, \
-            "received data does not form a matrix: local:"+str(olocal)+"remote:"+\
+            "received data does not form a matrix: local:"+str(olocal)+" remote:"+\
             str([(h,w,d.shape) for h,w,d in xlist])
         xmat = np.empty((nh, nw), dtype=np.ndarray)
         # put remote data
