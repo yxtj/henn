@@ -57,7 +57,7 @@ class Conv2dConf():
         #else:
         #    ox = int(np.floor(ox))
         #    oy = int(np.floor(oy))
-        return ox, oy
+        return max(0, ox), max(0, oy)
 
     def comp_out_coord(self, ix:int, iy:int, padded:bool=False):
         px = 0 if padded else self.padding[0]
