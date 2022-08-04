@@ -21,7 +21,8 @@ class Worker:
         self.sid = hid*nw + wid # sequence id of this worker
         # network
         self.net = None
-        self.worker_list = {} # map (hid, wid) to worker id
+        self.worker_list_m2s = {} # map matrix worker id (hid, wid) to serial id
+        self.worker_list_s2m = {} # map serial worker id (hid, wid) to matrix id
         # neural network
         self.model = None
         self.gshapes = None
@@ -48,12 +49,13 @@ class Worker:
         self.net = Network()
         r = self.net.alltoall((self.hid, self.wid))
         for i, c in enumerate(r):
-            self.worker_list[c] = i
+            self.worker_list_m2s[c] = i
+            self.worker_list_s2m[i] = c
         print(f"Worker {self.hid}-{self.wid} registered in network.")
 
     def init_model(self, model:list[PhenLayer], inshape:tuple):
         self.model = model
-        gshapes, shapers, layer_types = self.compute_model_meta( model, inshape)
+        gshapes, shapers, layer_types = self.compute_model_meta(model, inshape)
         self.gshapes = gshapes
         self.shapers = shapers
         self.ltypes = layer_types
@@ -74,6 +76,7 @@ class Worker:
         else:
             x = data
         for lid, layer in enumerate(self.model):
+            print(f"Worker {self.hid}-{self.wid} at Layer-{lid} {self.ltypes[lid]}")
             t = time.time()
             if isinstance(layer, PhenConv):
                 x = self.comp_conv(x, lid, layer)
@@ -110,7 +113,7 @@ class Worker:
         layer_types = []
         s = inshape
         for lyr in model:
-            print(s, lyr)
+            #print(s, lyr)
             s = lyr.out_shape(s)
             gshapes.append(s)
             t = lyr.ltype
@@ -177,8 +180,8 @@ class Worker:
         xlist = []
         dep = layer.depend_in(x)
         for i in range(len(dep)):
-            d = self.recv()
-            xlist.append(d)
+            hid, wid, msg = self.recv()
+            xlist.append((hid, wid, msg))
         dep_req = [(h, w) for h, w, d in dep]
         dep_rec = [(h, w) for h, w, d in xlist]
         assert sorted(dep_req) == sorted(dep_rec), f"req:{dep_req}, recv:{dep_rec}"
@@ -195,16 +198,22 @@ class Worker:
         #if n == 0:
         xlist = []
         for i in range(len(req)):
-            d = self.recv()
-            xlist.append(d)
+            hid, wid, msg = self.recv()
+            xlist.append((hid, wid, msg))
         x = layer.join_merge(x, xlist)
         return x
 
     # low level functions
 
+    def map_worker_s2m(self, sid):
+        return self.worker_list_s2m[sid]
+
+    def map_worker_m2s(self, hid, wid):
+        return self.worker_list_m2s[(hid, wid)]
+
     def send(self, hid, wid, data):
         t = time.time()
-        worker_id = hid*self.nw + wid
+        worker_id = self.map_worker_m2s(hid, wid)
         self.stat_send_msg += 1
         self.stat_send_byte += sys.getsizeof(data)
         self.net.isend(data, worker_id)
@@ -214,19 +223,16 @@ class Worker:
 
     def recv(self):
         t = time.time()
-        data = self.net.recv()
+        source, tag, data = self.net.recv()
+        hid, wid = self.map_worker_s2m(source)
         self.stat_recv_msg += 1
         self.stat_recv_byte += sys.getsizeof(data)
         t = time.time() - t
         self.stat_time_recv += t
-        return data
+        return hid, wid, data
 
     def sync(self):
         t = time.time()
         self.net.barrier()
         t = time.time() - t
         self.stat_time_sync += t
-
-
-
-
