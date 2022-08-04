@@ -93,6 +93,20 @@ class Worker:
             self.stat_time_layer[lid] += t
         return x
 
+    def join_result(self, xlocal, root=(0,0)):
+        assert len(root) == 2
+        assert 0 <= root[0] < self.nh and 0<= root[1] < self.nw
+        if root != (self.hid, self.wid):
+            self.send(root[0], root[1], xlocal)
+            return None
+        xmat = np.empty((self.nh, self.nw), dtype=object)
+        xmat[self.hid, self.wid] = xlocal
+        for i in range(self.nh*self.nw - 1):
+            hid, wid, msg = self.recv()
+            xmat[hid, wid] = msg
+        res = self.model[-1].global_result(xmat)
+        return res
+
     def show_stat(self):
         s = f"Statistics: worker {self.hid}-{self.wid} (w{self.sid}):\n"\
             f"  send {self.stat_send_msg} messages, {self.stat_send_byte} bytes; "\
