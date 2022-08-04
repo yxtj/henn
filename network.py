@@ -7,18 +7,24 @@ class Network:
         self.comm = MPI.COMM_WORLD
         self.size = self.comm.Get_size()
         self.rank = self.comm.Get_rank()
-    
+
     def send(self, data, dst, tag=0):
         self.comm.isend(data, dest=dst, tag=tag)
 
     def isend(self, data, dst, tag=0):
         self.comm.isend(data, dest=dst, tag=tag)
-        
+
     def recv(self, source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG):
-        return self.comm.recv(source=source, tag=tag)
-        
+        s = MPI.Status()
+        d = self.comm.recv(source=source, tag=tag, status=s)
+        return s.Get_source(), s.Get_tag(), d
+
     def irecv(self, source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG):
-        return self.comm.irecv(source=source, tag=tag)
+        s = MPI.Status()
+        if self.comm.iprobe(source=source, tag=tag, status=s):
+            return self.recv(source, tag)
+        else:
+            return None
 
 
     def broadcast(self, data, root):
@@ -27,7 +33,7 @@ class Network:
         '''
         r = self.comm.bcast(data, root)
         return r
-    
+
     def scatter(self, data, root):
         '''
         Send data[i] to worker i.
@@ -37,7 +43,7 @@ class Network:
         '''
         r = self.comm.scatter(data, root)
         return r
-    
+
     def gather(self, data, root):
         '''
         Receive data from all workers.
@@ -50,13 +56,13 @@ class Network:
 
     def alltoall(self, data):
         '''
-        Scatter data to all other workers. 
+        Scatter data to all other workers.
         And then gather received values of all workers (including itself) as a list
         Equivalent to scatter + gather.
         '''
         r = self.comm.alltoall([data for _ in range(self.size)])
         return r
-    
+
     def alltoallw(self, data):
         '''
         <data> is a list of length self.size
