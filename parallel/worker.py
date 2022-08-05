@@ -229,7 +229,8 @@ class Worker:
         t = time.time()
         worker_id = self.map_worker_m2s(hid, wid)
         self.stat_send_msg += 1
-        self.stat_send_byte += sys.getsizeof(data)
+        self.stat_send_byte += data.nbytes
+        #print(f'w{self.hid}-{self.wid} send ({data.nbytes}): {data}')
         self.net.isend(data, worker_id)
         t = time.time() - t
         self.stat_time_send += t
@@ -240,7 +241,8 @@ class Worker:
         source, tag, data = self.net.recv()
         hid, wid = self.map_worker_s2m(source)
         self.stat_recv_msg += 1
-        self.stat_recv_byte += sys.getsizeof(data)
+        self.stat_recv_byte += data.nbytes
+        #print(f'w{self.hid}-{self.wid} recv ({data.nbytes}): {data}')
         t = time.time() - t
         self.stat_time_recv += t
         return hid, wid, data
