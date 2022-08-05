@@ -9,7 +9,7 @@ class Network:
         self.rank = self.comm.Get_rank()
 
     def send(self, data, dst, tag=0):
-        self.comm.isend(data, dest=dst, tag=tag)
+        self.comm.send(data, dest=dst, tag=tag)
 
     def isend(self, data, dst, tag=0):
         self.comm.isend(data, dest=dst, tag=tag)
@@ -22,7 +22,7 @@ class Network:
     def irecv(self, source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG):
         s = MPI.Status()
         if self.comm.iprobe(source=source, tag=tag, status=s):
-            return self.recv(source, tag)
+            return self.recv(s.Get_source(), s.Get_tag())
         else:
             return None
 
