@@ -372,9 +372,9 @@ def communicate_conv_conv(nh, nw):
         ops = np.empty((nh, nw), dtype=np.ndarray)
         d = []
         for lid in range(2):
-            print("layer",lid)
+            #print("layer",lid)
             # prepare
-            print("prepare")
+            #print("prepare")
             buffer = defaultdict(list)
             for hid in range(nh):
                 for wid in range(nw):
@@ -385,7 +385,7 @@ def communicate_conv_conv(nh, nw):
                     for th, tw, desc in reqs:
                         msg = m.depend_message(lx, th, tw, desc)
                         buffer[(th, tw)].append((hid, wid, msg))
-            print("prepare-merge")
+            #print("prepare-merge")
             # depend - recv and merge
             for hid in range(nh):
                 for wid in range(nw):
@@ -397,7 +397,7 @@ def communicate_conv_conv(nh, nw):
                     lm = m.depend_merge(ips[(hid, wid)], buffer[(hid, wid)])
                     ips[(hid, wid)] = lm
             # compute
-            print("compute")
+            #print("compute")
             buffer = defaultdict(list)
             for hid in range(nh):
                 for wid in range(nw):
@@ -411,7 +411,7 @@ def communicate_conv_conv(nh, nw):
                         msg = m.join_message(lo, th, tw, desc)
                         buffer[(th, tw)].append((hid, wid, msg))
             # join - recv and merge
-            print("join")
+            #print("join")
             for hid in range(nh):
                 for wid in range(nw):
                     m = model_p[hid][wid][lid]
@@ -483,9 +483,9 @@ def communicate_conv_linear(nh, nw):
         ops = np.empty((nh, nw), dtype=np.ndarray)
         d = []
         for lid in range(3):
-            print("layer",lid)
+            #print("layer",lid)
             # prepare
-            print("prepare")
+            #print("prepare")
             buffer = defaultdict(list)
             for hid in range(nh):
                 for wid in range(nw):
@@ -496,7 +496,7 @@ def communicate_conv_linear(nh, nw):
                     for th, tw, desc in reqs:
                         msg = m.depend_message(lx, th, tw, desc)
                         buffer[(th, tw)].append((hid, wid, msg))
-            print("prepare-merge")
+            #print("prepare-merge")
             # depend - recv and merge
             for hid in range(nh):
                 for wid in range(nw):
@@ -508,7 +508,7 @@ def communicate_conv_linear(nh, nw):
                     lm = m.depend_merge(ips[(hid, wid)], buffer[(hid, wid)])
                     ips[(hid, wid)] = lm
             # compute
-            print("compute")
+            #print("compute")
             buffer = defaultdict(list)
             for hid in range(nh):
                 for wid in range(nw):
@@ -522,7 +522,7 @@ def communicate_conv_linear(nh, nw):
                         msg = m.join_message(lo, th, tw, desc)
                         buffer[(th, tw)].append((hid, wid, msg))
             # join - recv and merge
-            print("join")
+            #print("join")
             for hid in range(nh):
                 for wid in range(nw):
                     m = model_p[hid][wid][lid]
@@ -550,8 +550,8 @@ def test_connection():
     connect_conv_linear(2, 2)
 
 def test_message():
-    #communicate_linear_linear(2, 2)
-    #communicate_conv_conv(2, 2)
+    communicate_linear_linear(2, 2)
+    communicate_conv_conv(2, 2)
     #communicate_conv_conv(3, 3)
     communicate_conv_linear(2, 2)
 
