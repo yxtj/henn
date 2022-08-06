@@ -231,12 +231,12 @@ class PhenConv(PhenLayer):
 
     def _calc_computed_out_box_(self, hid, wid):
         itop, ileft, idown, iright = self._calc_expected_in_box_(hid, wid)
-        print(f'w{hid}-{wid}-in', itop, ileft, idown, iright)
+        #print(f'w{hid}-{wid}-in', itop, ileft, idown, iright)
         idown -= self.conf.kernel_size[0] - 1
         iright -= self.conf.kernel_size[0] - 1
         oul = self.conf.comp_out_coord(itop, ileft, True, False, (1,1))
         olr = self.conf.comp_out_coord(idown, iright, True, False, (1,1))
-        print(f'w{hid}-{wid}-out',oul, olr)
+        #print(f'w{hid}-{wid}-out',oul, olr)
         assert oul != (None, None) and olr != (None, None), \
             f"p{hid}-{wid}: ul {oul}, lr {olr}"
         return (*oul, *olr)
