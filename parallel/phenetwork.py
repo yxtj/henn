@@ -191,9 +191,6 @@ class PhenConv(PhenLayer):
         self.gi_ul = (inbox[0], inbox[1])
         # global coordinate of the lower right pixel (exclusive)
         self.gi_lr = (inbox[2], inbox[3])
-        # outputs:
-        #self.go_ul = self.conf.comp_out_coord(self.gi_ul[0], self.gi_ul[1], True)
-        #self.go_lr = self.conf.comp_out_coord(self.gi_lr[0], self.gi_lr[1], True)
 
     # helpers
 
@@ -218,10 +215,12 @@ class PhenConv(PhenLayer):
             ul = self.ishaper.get_offset(hid, wid)
             s = self.ishaper.get_shape(hid, wid)
             lr = (ul[0] + s[0], ul[1] + s[1])
-        last_h = (lr[0] // self.conf.stride[0])*self.conf.stride[0]
-        last_w = (lr[1] // self.conf.stride[1])*self.conf.stride[1]
-        lower = min(self.ishaper.gshape[0], last_h + self.conf.kernel_size[0] - 1)
-        right = min(self.ishaper.gshape[1], last_w + self.conf.kernel_size[1] - 1)
+        last_h = ((lr[0]-1) // self.conf.stride[0])*self.conf.stride[0]
+        last_w = ((lr[1]-1) // self.conf.stride[1])*self.conf.stride[1]
+        lower = max(lr[0] - 1, last_h + self.conf.kernel_size[0] - 1) + 1
+        right = max(lr[1] - 1, last_w + self.conf.kernel_size[1] - 1) + 1
+        lower = min(self.ishaper.gshape[0], lower)
+        right = min(self.ishaper.gshape[1], right)
         return (*ul, lower, right)
 
     def _calc_expected_out_box_(self, hid, wid):
@@ -232,10 +231,14 @@ class PhenConv(PhenLayer):
 
     def _calc_computed_out_box_(self, hid, wid):
         itop, ileft, idown, iright = self._calc_expected_in_box_(hid, wid)
+        print(f'w{hid}-{wid}-in', itop, ileft, idown, iright)
         idown -= self.conf.kernel_size[0] - 1
         iright -= self.conf.kernel_size[0] - 1
-        oul = self.conf.comp_out_coord(itop, ileft, True)
-        olr = self.conf.comp_out_coord(idown, iright, True)
+        oul = self.conf.comp_out_coord(itop, ileft, True, False, (1,1))
+        olr = self.conf.comp_out_coord(idown, iright, True, False, (1,1))
+        print(f'w{hid}-{wid}-out',oul, olr)
+        assert oul != (None, None) and olr != (None, None), \
+            f"p{hid}-{wid}: ul {oul}, lr {olr}"
         return (*oul, *olr)
 
     # depend for Conv: copy dependent data
@@ -308,6 +311,16 @@ class PhenConv(PhenLayer):
             x = computil.pad_data(x, self.conf.padding, self.wid==0, self.hid==0,
                                   self.wid==self.nw-1, self.hid==self.nh-1)
         # convolute
+        itop, ileft, _, _ = self._calc_expected_in_box_(self.hid, self.wid)
+        if itop % self.conf.stride[0] == 0:
+            h = 0
+        else:
+            h = self.conf.stride[0] - itop % self.conf.stride[0]
+        if ileft % self.conf.stride[0] == 0:
+            w = 0
+        else:
+            w = self.conf.stride[1] - ileft % self.conf.stride[1]
+        x = x[:, h:, w:]
         return computil.conv2d(x, self.conf, self.weight, self.bias, False)
 
     # join of Conv: balance the output
@@ -341,7 +354,7 @@ class PhenConv(PhenLayer):
 
     def join_message(self, x:np.ndarray, tgt_hid, tgt_wid, desc):
         itop, ileft, idown, iright = self._calc_expected_in_box_(self.hid, self.wid)
-        offset = self.conf.comp_out_coord(itop, ileft, True)
+        offset = self.conf.comp_out_coord(itop, ileft, True, False, (1,1))
         #offset = self.oshaper.get_offset(self.hid, self.wid)
         h1 = desc[0] - offset[0]
         w1 = desc[1] - offset[1]
@@ -430,7 +443,7 @@ class PhenLinear(PhenLayer):
 
     def bind_in_model(self, ishaper:Shaper, oshaper:Shaper,
                       idx:int, gshapes:list[tuple], layer_types:list[str]):
-        assert ishaper == self.ishaper
+        assert ishaper == self.ishaper, f'expect:{self.ishaper}, get:{ishaper}'
         super().bind_in_model(ishaper, oshaper, idx, gshapes, layer_types)
         # find last non-trivial layer
         last_idx = idx - 1
