@@ -67,9 +67,42 @@ def simple_test_2():
         diff = np.abs(ot.detach().numpy() - g).mean()
         print("difference:", diff)
 
+def big_test(nh, nw):
+    net = Network()
+    assert net.size == nh * nw
+    hid, wid = divmod(net.rank, nw)
+    #hid, wid = 0, 0
+
+    inshape = (1, 202, 202)
+    model_t = nn.Sequential(nn.Conv2d(1, 3, 4, 4),
+                            nn.Conv2d(3, 5, 4, 4),
+                            nn.Flatten(),
+                            nn.Linear(720, 100),
+                            nn.Linear(100, 10))
+    model_h = [hnt.make_layer(model_t[0]), hnt.make_layer(model_t[1]),
+               hnt.make_layer(model_t[3]), hnt.make_layer(model_t[4])]
+    model_p = [pn.PhenConv(nh, nw, hid, wid, model_h[0]),
+               pn.PhenConv(nh, nw, hid, wid, model_h[1]),
+               pn.PhenFlatten(nh, nw, hid, wid),
+               pn.PhenLinear(nh, nw, hid, wid, model_h[2]),
+               pn.PhenLinear(nh, nw, hid, wid, model_h[3]),]
+
+    w = worker.Worker(hid, wid, nh, nw)
+    w.init_model(model_p, inshape)
+    w.init_network()
+
+    data = np.random.random(inshape)
+    r = w.run(data)
+    w.show_stat()
+
+    g = w.join_result(r)
+    if net.rank == 0:
+        ot = model_t(torch.from_numpy(data).float().unsqueeze(0))
+        diff = np.abs(ot.detach().numpy() - g).mean()
+        print("difference:", diff)
+
 
 # %% general test
-
 
 
 # %% main
@@ -79,7 +112,8 @@ def main():
     np.random.seed(1)
 
     #simple_test_1()
-    simple_test_2()
+    #simple_test_2()
+    big_test(2, 2)
 
 
 if __name__ == "__main__":
