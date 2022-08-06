@@ -45,6 +45,22 @@ def test_conv():
     print("Conv correct:", np.all(np.abs(diff)<1e-4))
     print("  difference:",diff)
 
+
+def test_relu():
+    act_t = nn.ReLU()
+    act_p = pn.PhenRelu(1, 1, 0, 0)
+
+    diff = []
+    for i in range(10):
+        x = torch.rand((1,10))
+        ot = act_t(x.unsqueeze(0))
+        op = act_p(x.numpy())
+        d = np.abs(ot[0].detach().numpy()-op).mean()
+        diff.append(d)
+    print("ReLU correct:", np.all(np.abs(diff)<1e-4))
+    print("  difference:",diff)
+
+
 # %% parallelization of one layer
 
 def parallel_linear(nh=2, nw=2, nchin=100, nchout=10):
@@ -118,25 +134,94 @@ def parallel_conv(nh=2, nw=2, ks=3, stride=1, pad=0, sz=10):
     print(f"Parallel {nh}x{nw}: Conv kernel-{ks}, stride-{stride}, pad-{pad}, correct:", np.all(np.abs(diff)<1e-4))
     print("  difference:",diff)
 
+
+def parallel_act1(nh=2, nw=2, size=10):
+    act_t = nn.ReLU()
+    acts = [[pn.PhenReLU(nh, nw, hid, wid) for wid in range(nw)]
+          for hid in range(nh)]
+    ind = np.linspace(0, size, nh*nw+1, dtype=int)
+
+    diff = []
+    for _ in range(10):
+        x = torch.rand(size)
+        ot = act_t(x.unsqueeze(0)).detach().numpy()
+        xp = x.numpy()
+        ops = []
+        for hid in range(nh):
+            for wid in range(nw):
+                act = acts[hid][wid]
+                cut = xp[ind[act.pid]:ind[act.pid+1]]
+                o = act.local_forward(cut)
+                ops.append(o)
+        op = np.concatenate(ops)
+        d = np.abs(ot-op).mean()
+        diff.append(d)
+    print(f"Parallel {nh}x{nw}: for 1D relu correct:", np.all(np.abs(diff)<1e-4))
+    print("  difference:",diff)
+
+
+def parallel_act2(nh=2, nw=2, szx=10, szy=10):
+    act_t = nn.ReLU()
+    acts = [[pn.PhenReLU(nh, nw, hid, wid) for wid in range(nw)]
+          for hid in range(nh)]
+    indh = np.linspace(0, szx, nh+1, dtype=int)
+    indw = np.linspace(0, szy, nw+1, dtype=int)
+
+    diff = []
+    for _ in range(10):
+        x = torch.rand((szx, szy))
+        ot = act_t(x.unsqueeze(0)).detach().numpy()[0]
+        xp = x.numpy()
+        ops = np.empty((nh, nw), dtype=object)
+        for hid in range(nh):
+            for wid in range(nw):
+                act = acts[hid][wid]
+                cut = xp[indh[hid]:indh[hid+1], indw[wid]:indw[wid+1]]
+                o = act.local_forward(cut)
+                ops[hid, wid] = o
+        op = np.concatenate([np.concatenate(ops[i,:],1) for i in range(nh)],0)
+        d = np.abs(ot-op).mean()
+        diff.append(d)
+    print(f"Parallel {nh}x{nw}: for 2D relu correct:", np.all(np.abs(diff)<1e-4))
+    print("  difference:",diff)
+
 # %% main
+
+def correct_test():
+    #test_linear()
+    #test_conv()
+    test_relu()
+
+def linear_test():
+    parallel_linear(2, 2, 100, 10)
+    parallel_linear(3, 2, 100, 10)
+    parallel_linear(3, 3, 100, 10)
+
+def conv_test():
+    parallel_conv(2, 2, 3, 1, 0, 9)
+    parallel_conv(2, 2, 3, 1, 0, 10)
+    parallel_conv(2, 2, 3, 1, 1, 10)
+    parallel_conv(2, 2, 3, 2, 0, 10)
+    parallel_conv(2, 2, 3, 2, 1, 10)
+
+def act_test():
+    parallel_act1(2, 2, 10)
+    parallel_act1(3, 3, 10)
+    parallel_act2(2, 2, 10, 10)
+    parallel_act2(3, 3, 10, 10)
 
 def main():
     # correctness
-    #test_linear()
-    #test_conv()
+    correct_test()
 
     # parallel linear
-    #parallel_linear(2, 2, 100, 10)
-    #parallel_linear(3, 2, 100, 10)
-    #parallel_linear(3, 3, 100, 10)
+    linear_test()
 
     # parallel conv
-    parallel_conv(2, 2, 3, 1, 0, 9)
-    #parallel_conv(2, 2, 3, 1, 0, 10)
-    #arallel_conv(2, 2, 3, 1, 1, 10)
-    #parallel_conv(2, 2, 3, 2, 0, 10)
-    #parallel_conv(2, 2, 3, 2, 1, 10)
+    conv_test()
 
+    # parallel activation
+    act_test()
 
 if __name__ == "__main__":
     main()
