@@ -3,6 +3,7 @@ import parallel.phenetwork as pn
 import parallel.worker as worker
 from network import Network
 
+import time
 import numpy as np
 import torch
 import torch.nn as nn
@@ -58,11 +59,14 @@ def simple_test_2():
     w.init_network()
 
     data = np.random.random(inshape)
+    t = time.time()
     r = w.run(data)
+    t = time.time() - t
     w.show_stat()
 
     g = w.join_result(r)
     if net.rank == 0:
+        print("Total Time:", t)
         ot = model_t(torch.from_numpy(data).float().unsqueeze(0))
         diff = np.abs(ot.detach().numpy() - g).mean()
         print("difference:", diff)
@@ -92,14 +96,17 @@ def big_test(nh, nw):
     w.init_network()
 
     data = np.random.random(inshape)
+    t = time.time()
     r = w.run(data)
+    t = time.time() - t
     w.show_stat()
 
     g = w.join_result(r)
     if net.rank == 0:
+        print("Total Time:", t)
         ot = model_t(torch.from_numpy(data).float().unsqueeze(0))
         diff = np.abs(ot.detach().numpy() - g).mean()
-        print("difference:", diff)
+        print("Difference:", diff)
 
 
 # %% general test
