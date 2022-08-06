@@ -7,6 +7,11 @@ import heutil
 
 from .shaper import Shaper, make_shaper #Shaper1D, Shaper2D,
 
+# for debug:
+__DEBUG__ = False
+import time
+TIME_MA = 2.6e-6
+TIME_BS = 66e-3
 
 # %% layers
 
@@ -311,7 +316,7 @@ class PhenConv(PhenLayer):
             x = computil.pad_data(x, self.conf.padding, self.wid==0, self.hid==0,
                                   self.wid==self.nw-1, self.hid==self.nh-1)
         # convolute
-        itop, ileft, _, _ = self._calc_expected_in_box_(self.hid, self.wid)
+        itop, ileft = self.ishaper.get_offset(self.hid, self.wid)
         if itop % self.conf.stride[0] == 0:
             h = 0
         else:
@@ -321,7 +326,10 @@ class PhenConv(PhenLayer):
         else:
             w = self.conf.stride[1] - ileft % self.conf.stride[1]
         x = x[:, h:, w:]
-        return computil.conv2d(x, self.conf, self.weight, self.bias, False)
+        res = computil.conv2d(x, self.conf, self.weight, self.bias, False)
+        if __DEBUG__:
+            time.sleep(res.size*np.prod(self.conf.kernel_size)*TIME_MA)
+        return res
 
     # join of Conv: balance the output
 
@@ -434,7 +442,6 @@ class PhenLinear(PhenLayer):
         self.local_weight = self.ishaper.pick_data(hid, wid, self.weight)
         # set local bias:
         #   the pid-th part handles the pid-th channel's bias
-        #self.jshaper = make_shaper(self.nh, self.nw, 1, (self.out_ch,), interleave=True)
         if self.bias is None:
             self.local_bias = None
         else:
@@ -447,7 +454,8 @@ class PhenLinear(PhenLayer):
         super().bind_in_model(ishaper, oshaper, idx, gshapes, layer_types)
         # find last non-trivial layer
         last_idx = idx - 1
-        while last_idx >= 0 and layer_types[last_idx] in ["flatten", "identity"]:
+        while last_idx >= 0 and layer_types[last_idx] in [
+                "flatten", "identity", "relu", "square"]:
             last_idx -= 1
         # update the local weights for Conv Layer
         if idx != 0 and last_idx >= 0 and layer_types[last_idx] == "conv":
@@ -465,6 +473,8 @@ class PhenLinear(PhenLayer):
         #print(r.shape, None if self.local_bias is None else self.local_bias.shape)
         if self.local_bias is not None:
             r += self.local_bias
+        if __DEBUG__:
+            time.sleep(self.local_weight.size*TIME_MA)
         return r
 
     def join_out(self, x:np.ndarray):
@@ -548,6 +558,24 @@ class PhenIdentity(PhenLayer):
     def local_forward(self, x:np.ndarray):
         return x
 
+    def global_result(self, xmat:np.ndarray):
+        #assert self.ishaper == self.oshaper
+        dim = xmat[0, 0].ndim
+        assert dim == 1 or dim == 3
+        if dim == 1:
+            out = np.empty(self.oshaper.gshape, xmat[0, 0].dtype)
+        else:
+            nch = xmat[0, 0].shape[0]
+            out = np.empty((nch, *self.oshaper.gshape), xmat[0, 0].dtype)
+        for hid in range(self.nh):
+            for wid in range(self.nw):
+                rng = self.oshaper.get_range(hid, wid)
+                if dim == 1:
+                    out[rng[0]:rng[1]] = xmat[hid, wid]
+                else:
+                    out[:, rng[0]:rng[2], rng[1]:rng[3]] = xmat[hid, wid]
+        return out
+
     def in_shape(self):
         return None
 
@@ -557,7 +585,7 @@ class PhenIdentity(PhenLayer):
 
 # %% activation layers
 
-class PhenRelu(PhenLayer):
+class PhenReLU(PhenLayer):
     def __init__(self, nh, nw, hid, wid, name=None):
         super().__init__(nh, nw, hid, wid, "relu", name)
 
@@ -567,6 +595,30 @@ class PhenRelu(PhenLayer):
         else:
             shape = x.shape
             out = np.array([heutil.relu(i) for i in x.ravel()]).reshape(shape)
+        if __DEBUG__:
+            time.sleep(out.size*TIME_BS)
+        return out
+
+    def global_result(self, xmat:np.ndarray):
+        #assert self.ishaper == self.oshaper
+        dim = xmat[0, 0].ndim
+        assert dim == 1 or dim == 3
+        if dim == 1:
+            out = np.empty(self.oshaper.gshape, xmat[0, 0].dtype)
+        else:
+            nch = xmat[0, 0].shape[0]
+            out = np.empty((nch, *self.oshaper.gshape), xmat[0, 0].dtype)
+        for hid in range(self.nh):
+            for wid in range(self.nw):
+                #TODO: use consecutive for 1D-shaper and oshaper.get_range here
+                #rng = self.oshaper.get_range(hid, wid)
+                if dim == 1:
+                    #out[rng[0]:rng[1]] = xmat[hid, wid]
+                    m = self.oshaper.get_meta(hid, wid)
+                    out[m[0]::m[1]] = xmat[hid, wid]
+                else:
+                    rng = self.oshaper.get_range(hid, wid)
+                    out[:, rng[0]:rng[2], rng[1]:rng[3]] = xmat[hid, wid]
         return out
 
     def in_shape(self):
@@ -586,6 +638,26 @@ class PhenSquare(PhenLayer):
         else:
             shape = x.shape
             out = np.array([heutil.square(i) for i in x.ravel()]).reshape(shape)
+        if __DEBUG__:
+            time.sleep(out.size*TIME_BS)
+        return out
+
+    def global_result(self, xmat:np.ndarray):
+        #assert self.ishaper == self.oshaper
+        dim = xmat[0, 0].ndim
+        assert dim == 1 or dim == 3
+        if dim == 1:
+            out = np.empty(self.oshaper.gshape, xmat[0, 0].dtype)
+        else:
+            nch = xmat[0, 0].shape[0]
+            out = np.empty((nch, *self.oshaper.gshape), xmat[0, 0].dtype)
+        for hid in range(self.nh):
+            for wid in range(self.nw):
+                rng = self.oshaper.get_range(hid, wid)
+                if dim == 1:
+                    out[rng[0]:rng[1]] = xmat[hid, wid]
+                else:
+                    out[:, rng[0]:rng[2], rng[1]:rng[3]] = xmat[hid, wid]
         return out
 
     def in_shape(self):
@@ -593,6 +665,4 @@ class PhenSquare(PhenLayer):
 
     def out_shape(self, inshape:tuple):
         return inshape
-
-
 
