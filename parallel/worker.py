@@ -51,7 +51,7 @@ class Worker:
         for i, c in enumerate(r):
             self.worker_list_m2s[c] = i
             self.worker_list_s2m[i] = c
-        print(f"Worker {self.hid}-{self.wid} registered in network.")
+        print(f"Worker {self.hid}-{self.wid} registered in network.", flush=True)
 
     def init_model(self, model:list[PhenLayer], inshape:tuple):
         self.model = model
@@ -67,7 +67,7 @@ class Worker:
         self.stat_time_layer_compute = [0.0 for _ in range(n)]
         self.stat_time_layer_postprocess = [0.0 for _ in range(n)]
         self.stat_time_layer = [0.0 for _ in range(n)]
-        print(f"Worker {self.hid}-{self.wid} load model.")
+        print(f"Worker {self.hid}-{self.wid} load model.", flush=True)
 
     def run(self, data:np.ndarray, complete_input=True):
         if complete_input == True:
@@ -76,7 +76,8 @@ class Worker:
         else:
             x = data
         for lid, layer in enumerate(self.model):
-            print(f"Worker {self.hid}-{self.wid} at Layer-{lid} {self.ltypes[lid]}")
+            print(f"Worker {self.hid}-{self.wid} at Layer-{lid} {self.ltypes[lid]}",
+                  flush=True)
             t = time.time()
             if isinstance(layer, PhenConv):
                 x = self.comp_conv(x, lid, layer)
@@ -88,7 +89,7 @@ class Worker:
                 x = self.comp_act(x, lid, layer)
             else:
                 print(f"{lid}-th layer of type {self.ltypes[lid]}"
-                      " is not supported")
+                      " is not supported", flush=True)
             t = time.time() - t
             self.stat_time_layer[lid] += t
         return x
@@ -117,7 +118,7 @@ class Worker:
             f"    postprocess time: {self.stat_time_layer_postprocess};\n"\
             f"  synchronization time: {self.stat_time_sync}, "\
             f"send time: {self.stat_time_send}, recv time: {self.stat_time_recv}"
-        print(s)
+        print(s, flush=True)
 
     # inner functions - model prepare
 
@@ -145,11 +146,15 @@ class Worker:
 
     def comp_conv(self, x, lid:int, conv:PhenConv):
         t0 = time.time()
+        print(f'w{self.hid}-{self.wid}: preprocess', flush=True)
         x = self.preprocess(conv, x)
         t1 = time.time()
+        print(f'w{self.hid}-{self.wid}: forward', flush=True)
         x = conv.local_forward(x)
         t2 = time.time()
+        print(f'w{self.hid}-{self.wid}: postprocess', flush=True)
         x = self.postprocess(conv, x)
+        print(f'w{self.hid}-{self.wid}: done', flush=True)
         t3 = time.time()
         self.stat_time_layer_prepare[lid] = t1-t0
         self.stat_time_layer_compute[lid] = t2-t1
@@ -188,11 +193,13 @@ class Worker:
     def preprocess(self, layer:PhenLayer, x:np.ndarray):
         # prepare data depdency
         rqtgts = layer.depend_out(x)
+        #print(f'w{self.hid}-{self.wid}: send {len(rqtgts)}', flush=True)
         for hid, wid, desc in rqtgts:
             msg = layer.depend_message(x, hid, wid, desc)
             self.send(hid, wid, msg)
         xlist = []
         dep = layer.depend_in(x)
+        #print(f'w{self.hid}-{self.wid}: waiting {len(dep)}', flush=True)
         for i in range(len(dep)):
             hid, wid, msg = self.recv()
             xlist.append((hid, wid, msg))
@@ -205,10 +212,12 @@ class Worker:
     def postprocess(self, layer:PhenLayer, x:np.ndarray):
         # load balance
         tgts = layer.join_out(x)
+        #print(f'w{self.hid}-{self.wid}: send {len(tgts)}', flush=True)
         for hid, wid, desc in tgts:
             msg = layer.join_message(x, hid, wid, desc)
             self.send(hid, wid, msg)
         req = layer.join_in(x)
+        #print(f'w{self.hid}-{self.wid}: waiting {len(req)}', flush=True)
         #if n == 0:
         xlist = []
         for i in range(len(req)):
@@ -230,7 +239,7 @@ class Worker:
         worker_id = self.map_worker_m2s(hid, wid)
         self.stat_send_msg += 1
         self.stat_send_byte += data.nbytes
-        #print(f'w{self.hid}-{self.wid} send ({data.nbytes}): {data}')
+        #print(f'w{self.hid}-{self.wid} send {data.shape} ({data.nbytes}) to {hid}-{wid}', flush=True)
         self.net.isend(data, worker_id)
         t = time.time() - t
         self.stat_time_send += t
@@ -242,7 +251,7 @@ class Worker:
         hid, wid = self.map_worker_s2m(source)
         self.stat_recv_msg += 1
         self.stat_recv_byte += data.nbytes
-        #print(f'w{self.hid}-{self.wid} recv ({data.nbytes}): {data}')
+        #print(f'w{self.hid}-{self.wid} recv {data.shape} ({data.nbytes}) from {hid}-{wid}', flush=True)
         t = time.time() - t
         self.stat_time_recv += t
         return hid, wid, data
