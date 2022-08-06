@@ -59,7 +59,18 @@ class Conv2dConf():
         #    oy = int(np.floor(oy))
         return max(0, ox), max(0, oy)
 
-    def comp_out_coord(self, ix:int, iy:int, padded:bool=False):
+    def comp_out_coord(self, ix:int, iy:int, padded:bool=False,
+                       exact:bool=False, offset=(1,1)):
+        '''
+        Compute the output coordinate corresponding to the input coordinate.
+        "padded" means whether "ix" and "iy" consider the padding pixels.
+        "exact" means whether to compute output using the EXACT input coordinate.
+          If exact is True and ix-iy does not match to a valid position (this
+          happens when stride is not 1), output (None, None). Otherwise, this
+          function move the input along the "offset" direction to the nearest
+          valid position.
+        "offset" gives the direction (postive or negative) to move input coordinate.
+        '''
         px = 0 if padded else self.padding[0]
         py = 0 if padded else self.padding[1]
         cx, rx = divmod(px+ix, self.stride[0])
@@ -67,7 +78,13 @@ class Conv2dConf():
         if rx == 0 and ry == 0:
             return cx, cy
         else:
-            return None, None
+            if exact:
+                return None, None
+            if rx != 0 and offset[0] != 0:
+                cx = cx if offset[0] < 0 else cx + 1
+            if ry != 0 and offset[1] != 0:
+                cy = cy if offset[1] < 0 else cy + 1
+            return cx, cy
 
     def comp_in_size(self, sx:int, sy:int, with_pad:bool=False):
         '''
