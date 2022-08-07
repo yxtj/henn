@@ -262,7 +262,7 @@ def communication_template(nh, nw, inshape, model_t, model_p, ntrails=10):
                 ips[hid, wid] = shapers[0].pick_data(hid, wid, xp)
         ops = np.empty((nh, nw), dtype=np.ndarray)
         d = []
-        for lid in range(2):
+        for lid in range(len(model_p[0][0])):
             #print("layer",lid)
             # prepare
             #print("prepare")
@@ -512,6 +512,24 @@ def model_big_2c2l(nh, nw):
     fc1_h = hnt.make_linear(fc1_t)
     fc2_h = hnt.make_linear(fc2_t)
 
+    def make_phen_model(nh, nw, hid, wid, inshape:tuple, model_t:nn.Sequential):
+        res = []
+        for i, m in enumerate(model_t):
+            if isinstance(m, nn.Conv2d):
+                mh = hnt.make_layer(m)
+                mp = pn.PhenConv(nh, nw, hid, wid, mh)
+            elif isinstance(m, nn.Linear):
+                mh = hnt.make_layer(m)
+                mp = pn.PhenLinear(nh, nw, hid, wid, mh)
+            elif isinstance(m, nn.ReLU):
+                mp = pn.PhenReLU(nh, nw, hid, wid)
+            elif isinstance(m, nn.Flatten):
+                mp = pn.PhenFlatten(nh, nw, hid, wid)
+            else:
+                print(f'{i}-th layer {m} is not supported.')
+            res.append(mp)
+        return res
+
     model_p = [[[pn.PhenConv(nh, nw, hid, wid, conv1_h),
                  pn.PhenReLU(nh, nw, hid, wid),
                  pn.PhenConv(nh, nw, hid, wid, conv2_h),
@@ -523,7 +541,11 @@ def model_big_2c2l(nh, nw):
         for wid in range(nw)]
         for hid in range(nh)]
 
-    diff = communication_template(nh, nw, inshape, model_t, model_p)
+    model_p = [[make_phen_model(nh, nw, hid, wid, inshape, model_t)
+                for wid in range(nw)]
+               for hid in range(nh)]
+
+    diff = communication_template(nh, nw, inshape, model_t, model_p, 10)
     print(f"Model {nh}x{nw} of conv-relu-linear: correct:",
           np.all(np.abs(diff) < 1e-4))
     print("  difference:", np.array(diff))
@@ -554,9 +576,11 @@ def main():
 
     # message-based layer connection
     #test_message()
-    test_message_relu()
+    #test_message_relu()
 
     #communicate_model_stride(2,2,2)
+
+    model_big_2c2l(3, 3)
 
 
 if __name__ == "__main__":
