@@ -88,6 +88,7 @@ class Worker:
             else:
                 print(f"{lid}-th layer of type {self.ltypes[lid]}"
                       " is not supported", flush=True)
+            self.sync()
             t = time.time() - t
             self.stat_time_layer[lid] += t
         return x
