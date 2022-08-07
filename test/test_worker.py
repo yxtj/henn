@@ -111,16 +111,85 @@ def big_test(nh, nw):
 
 # %% general test
 
+def make_phen_model(nh, nw, hid, wid, inshape:tuple, model_t:nn.Sequential):
+    res = []
+    for i, m in enumerate(model_t):
+        if isinstance(m, nn.Conv2d):
+            mh = hnt.make_layer(m)
+            mp = pn.PhenConv(nh, nw, hid, wid, mh)
+        elif isinstance(m, nn.Linear):
+            mh = hnt.make_layer(m)
+            mp = pn.PhenLinear(nh, nw, hid, wid, mh)
+        elif isinstance(m, nn.ReLU):
+            mp = pn.PhenReLU(nh, nw, hid, wid)
+        elif isinstance(m, nn.Flatten):
+            mp = pn.PhenFlatten(nh, nw, hid, wid)
+        else:
+            print(f'{i}-th layer {m} is not supported.')
+        res.append(mp)
+    return res
+
+
+def general_worker_run(nh, nw, inshape, model_t):
+    net = Network()
+    assert net.size == nh * nw
+    hid, wid = divmod(net.rank, nw)
+
+    model_p = make_phen_model(nh, nw, hid, wid, inshape, model_t)
+
+    w = worker.Worker(hid, wid, nh, nw)
+    w.init_model(model_p, inshape)
+    w.init_network()
+
+    data = np.random.random(inshape)
+    t = time.time()
+    r = w.run(data)
+    t = time.time() - t
+    w.show_stat()
+
+    g = w.join_result(r)
+    if net.rank == 0:
+        print("Total Time:", t)
+        ot = model_t(torch.from_numpy(data).float().unsqueeze(0))
+        diff = np.abs(ot.detach().numpy() - g).mean()
+        print("Difference:", diff)
+
 
 # %% main
+
+def basic_test():
+    simple_test_1()
+    simple_test_2()
+    big_test(2, 2)
+
+def test_case1(nh=2, nw=2):
+    inshape = (1, 202, 202)
+    model_t = nn.Sequential(nn.Conv2d(1, 3, 4, 4), nn.ReLU(),
+                            nn.Flatten(),
+                            nn.Linear(7500, 100), nn.ReLU(),
+                            nn.Linear(100, 10))
+    general_worker_run(nh, nw, inshape, model_t)
+
+def test_case2(nh=2, nw=2):
+    inshape = (1, 202, 202)
+    model_t = nn.Sequential(nn.Conv2d(1, 3, 4, 4), nn.ReLU(),
+                            nn.Conv2d(3, 5, 4, 4), nn.ReLU(),
+                            nn.Flatten(),
+                            nn.Linear(720, 100), nn.ReLU(),
+                            nn.Linear(100, 10))
+    general_worker_run(nh, nw, inshape, model_t)
+
 
 def main():
     torch.manual_seed(123)
     np.random.seed(1)
 
-    #simple_test_1()
-    #simple_test_2()
-    big_test(2, 2)
+    #basic_test()
+
+    #test_case1(2, 2)
+    #test_case1(3, 3)
+
+    test_case2(2, 2)
 
 
 if __name__ == "__main__":
