@@ -7,7 +7,7 @@ import sys
 
 #import hennlayer
 
-from .phenetwork import PhenLayer, PhenConv, PhenLinear, PhenFlatten, PhenRelu, PhenSquare
+from .phenetwork import PhenLayer, PhenConv, PhenLinear, PhenFlatten, PhenReLU, PhenSquare
 from network import Network
 
 from .shaper import make_shaper
@@ -85,7 +85,7 @@ class Worker:
                 x = self.comp_linear(x, lid, layer)
             elif isinstance(layer, PhenFlatten):
                 x = self.comp_flatten(x, lid, layer)
-            elif isinstance(layer, PhenRelu) or isinstance(layer, PhenSquare):
+            elif isinstance(layer, PhenReLU) or isinstance(layer, PhenSquare):
                 x = self.comp_act(x, lid, layer)
             else:
                 print(f"{lid}-th layer of type {self.ltypes[lid]}"
@@ -181,7 +181,7 @@ class Worker:
         self.stat_time_layer_compute[lid] = t
         return x
 
-    def comp_act(self, x, lid:int, act:PhenRelu):
+    def comp_act(self, x, lid:int, act:PhenReLU):
         t = time.time()
         x = act.local_forward(x)
         t = time.time() - t
