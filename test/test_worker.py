@@ -9,6 +9,8 @@ import torch
 import torch.nn as nn
 import hennlayer_torch as hnt
 
+import sys
+
 # %% simple test
 
 def simple_test_1():
@@ -189,7 +191,24 @@ def main():
     #test_case1(2, 2)
     #test_case1(3, 3)
 
-    test_case2(2, 2)
+    #test_case2(2, 2)
+    #test_case2(2, 3)
+
+    net = Network()
+    if len(sys.argv) == 4:
+        c = int(sys.argv[1])
+        nh = int(sys.argv[2])
+        nw = int(sys.argv[3])
+        assert nh*nw == net.size
+        if c == 1:
+            test_case1(nh, nw)
+        elif c == 2:
+            test_case2(nh, nw)
+        else:
+            print(f"test case {c} not supported")
+    else:
+        if net.rank == 0:
+            print("Usage: <case-id> <nh> <nw>")
 
 
 if __name__ == "__main__":
