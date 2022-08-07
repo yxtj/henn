@@ -2,15 +2,13 @@
 
 import numpy as np
 import time
-import sys
-#import multiprocessing as mp
-
-#import hennlayer
-
-from .phenetwork import PhenLayer, PhenConv, PhenLinear, PhenFlatten, PhenReLU, PhenSquare
 from network import Network
-
+from .phenetwork import PhenLayer, PhenConv, PhenLinear, PhenFlatten, PhenReLU, PhenSquare
 from .shaper import make_shaper
+
+
+__DEBUG__ = False
+__INFLATION_FACTOR__ = 1000
 
 class Worker:
     def __init__(self, hid, wid, nh, nw):
@@ -146,16 +144,16 @@ class Worker:
 
     def comp_conv(self, x, lid:int, conv:PhenConv):
         t0 = time.time()
-        print(f'w{self.hid}-{self.wid}: preprocess', flush=True)
+        print(f'  w{self.hid}-{self.wid}: L-{lid} preprocess', flush=True)
         x = self.preprocess(conv, x)
         t1 = time.time()
-        print(f'w{self.hid}-{self.wid}: forward', flush=True)
+        print(f'  w{self.hid}-{self.wid}: L-{lid} forward', flush=True)
         x = conv.local_forward(x)
         t2 = time.time()
-        print(f'w{self.hid}-{self.wid}: postprocess', flush=True)
+        print(f'  w{self.hid}-{self.wid}: L-{lid} postprocess', flush=True)
         x = self.postprocess(conv, x)
-        print(f'w{self.hid}-{self.wid}: done', flush=True)
         t3 = time.time()
+        print(f'  w{self.hid}-{self.wid}: L-{lid} done', flush=True)
         self.stat_time_layer_prepare[lid] = t1-t0
         self.stat_time_layer_compute[lid] = t2-t1
         self.stat_time_layer_postprocess[lid] = t3-t2
@@ -237,10 +235,12 @@ class Worker:
     def send(self, hid, wid, data):
         t = time.time()
         worker_id = self.map_worker_m2s(hid, wid)
+        #print(f'w{self.hid}-{self.wid} send {data.shape} ({data.nbytes}) to {hid}-{wid}', flush=True)
+        if __DEBUG__:
+            data = np.stack([data for _ in range(__INFLATION_FACTOR__)])
+        self.net.isend(data, worker_id)
         self.stat_send_msg += 1
         self.stat_send_byte += data.nbytes
-        #print(f'w{self.hid}-{self.wid} send {data.shape} ({data.nbytes}) to {hid}-{wid}', flush=True)
-        self.net.isend(data, worker_id)
         t = time.time() - t
         self.stat_time_send += t
 
@@ -248,6 +248,8 @@ class Worker:
     def recv(self):
         t = time.time()
         source, tag, data = self.net.recv()
+        if __DEBUG__:
+            data = data[0]
         hid, wid = self.map_worker_s2m(source)
         self.stat_recv_msg += 1
         self.stat_recv_byte += data.nbytes
