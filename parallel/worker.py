@@ -145,16 +145,16 @@ class Worker:
 
     def comp_conv(self, x, lid:int, conv:PhenConv):
         t0 = time.time()
-        print(f'  w{self.hid}-{self.wid}: L-{lid} preprocess', flush=True)
+        print(f'  w{self.hid}-{self.wid}: L-{lid} conv-preprocess', flush=True)
         x = self.preprocess(conv, x)
         t1 = time.time()
-        print(f'  w{self.hid}-{self.wid}: L-{lid} forward', flush=True)
+        print(f'  w{self.hid}-{self.wid}: L-{lid} conv-forward', flush=True)
         x = conv.local_forward(x)
         t2 = time.time()
-        print(f'  w{self.hid}-{self.wid}: L-{lid} postprocess', flush=True)
+        print(f'  w{self.hid}-{self.wid}: L-{lid} conv-postprocess', flush=True)
         x = self.postprocess(conv, x)
         t3 = time.time()
-        print(f'  w{self.hid}-{self.wid}: L-{lid} done', flush=True)
+        print(f'  w{self.hid}-{self.wid}: L-{lid} conv-done', flush=True)
         self.stat_time_layer_prepare[lid] = t1-t0
         self.stat_time_layer_compute[lid] = t2-t1
         self.stat_time_layer_postprocess[lid] = t3-t2
@@ -162,12 +162,16 @@ class Worker:
 
     def comp_linear(self, x, lid:int, fc:PhenLinear):
         t0 = time.time()
+        print(f'  w{self.hid}-{self.wid}: L-{lid} fc-preprocess', flush=True)
         x = self.preprocess(fc, x)
         t1 = time.time()
+        print(f'  w{self.hid}-{self.wid}: L-{lid} fc-forward', flush=True)
         x = fc.local_forward(x)
         t2 = time.time()
+        print(f'  w{self.hid}-{self.wid}: L-{lid} fc-postprocess', flush=True)
         x = self.postprocess(fc, x)
         t3 = time.time()
+        print(f'  w{self.hid}-{self.wid}: L-{lid} fc-done', flush=True)
         self.stat_time_layer_prepare[lid] = t1-t0
         self.stat_time_layer_compute[lid] = t2-t1
         self.stat_time_layer_postprocess[lid] = t3-t2
@@ -182,8 +186,10 @@ class Worker:
 
     def comp_act(self, x, lid:int, act:PhenReLU):
         t = time.time()
+        print(f'  w{self.hid}-{self.wid}: L-{lid} act-forward', flush=True)
         x = act.local_forward(x)
         t = time.time() - t
+        print(f'  w{self.hid}-{self.wid}: L-{lid} act-done', flush=True)
         self.stat_time_layer_compute[lid] = t
         return x
 

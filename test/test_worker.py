@@ -139,6 +139,18 @@ def general_worker_run(nh, nw, inshape, model_t):
 
     model_p = make_phen_model(nh, nw, hid, wid, inshape, model_t)
 
+    if net.rank == 0:
+        #info = [(i, m.ishaper.gshape, m.ltype) for i, m in enumerate(model_p)]
+        shapes = [inshape]
+        ltypes = []
+        s = inshape
+        for i, m in enumerate(model_p):
+            s = m.out_shape(s)
+            shapes.append(s)
+            ltypes.append(m.ltype)
+        print('\n'.join([f'  Layer-{i} {ltypes[i]}: {shapes[i]} -> {shapes[i+1]}'
+                         for i in range(len(ltypes))]), flush=True)
+
     w = worker.Worker(hid, wid, nh, nw)
     w.init_model(model_p, inshape)
     w.init_network()
