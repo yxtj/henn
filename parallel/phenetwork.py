@@ -265,8 +265,9 @@ class PhenConv(PhenLayer):
                 if h != self.hid or w != self.wid:
                     b = self._calc_expected_in_box_(h, w)
                     o = computil.box_overlap(box, b)
-                    desc = (o[0]-offh, o[1]-offw, o[2]-offh, o[3]-offw)
-                    res.append((h, w, desc))
+                    if o is not None:
+                        desc = (o[0]-offh, o[1]-offw, o[2]-offh, o[3]-offw)
+                        res.append((h, w, desc))
         return res
 
     def depend_in(self, x:np.ndarray):
@@ -378,7 +379,8 @@ class PhenConv(PhenLayer):
         if len(olocal) == 1:
             h1, w1, h2, w2 = olocal[0][2]
         if len(xlist) == 0:
-            return xlocal[:, h1:h2, w1:w2]
+            offh, offw = box[0], box[1]
+            return xlocal[:, h1-offh:h2-offh, w1-offw:w2-offw]
         # make xmat
         hw = np.array([(h,w) for h, w, _ in xlist])
         hmin, wmin = hw.min(0)
@@ -467,8 +469,8 @@ class PhenLinear(PhenLayer):
             self.local_weight = lw.reshape(self.out_ch, -1)
 
     def local_forward(self, x:np.ndarray):
-        #print(x, self.local_weight, self.local_bias)
-        #print(x.shape, self.local_weight.shape)
+        #print(self.hid, self.wid, x, self.local_weight, self.local_bias)
+        #print(self.hid, self.wid, x.shape, self.local_weight.shape)
         r = heutil.dot_product_21(self.local_weight, x)
         #print(r.shape, None if self.local_bias is None else self.local_bias.shape)
         if self.local_bias is not None:
