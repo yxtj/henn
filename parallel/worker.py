@@ -210,7 +210,8 @@ class Worker:
             xlist.append((hid, wid, msg))
         dep_req = [(h, w) for h, w, d in dep]
         dep_rec = [(h, w) for h, w, d in xlist]
-        assert sorted(dep_req) == sorted(dep_rec), f"req:{dep_req}, recv:{dep_rec}"
+        assert sorted(dep_req) == sorted(dep_rec), \
+            f"{self.hid}-{self.wid} req:{dep_req}, recv:{dep_rec}"
         x = layer.depend_merge(x, xlist)
         return x
 
