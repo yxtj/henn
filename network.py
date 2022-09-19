@@ -37,7 +37,7 @@ class Network:
     def scatter(self, data, root):
         '''
         Send data[i] to worker i.
-        <data> is a list of length self.size.
+        *data* is a list of length self.size.
         Return the received value.
         Pair with gather.
         '''
@@ -47,7 +47,7 @@ class Network:
     def gather(self, data, root):
         '''
         Receive data from all workers.
-        <data> is a value.
+        *data* is a value.
         Return the received list of length self.size.
         Pair with scatter.
         '''
@@ -65,7 +65,7 @@ class Network:
 
     def alltoallw(self, data):
         '''
-        <data> is a list of length self.size
+        *data* is a list of length self.size
         It sends data[i] to worker i.
         Return a list of received values from all workers (including itself)
         '''
