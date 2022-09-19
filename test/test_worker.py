@@ -33,7 +33,7 @@ def simple_test_1():
 
     data = np.random.random(inshape)
     r = w.run(data)
-    w.show_stat()
+    print(w.get_stat(), flush=True)
 
     g = w.join_result(r)
     ot = model_t(torch.from_numpy(data).float().unsqueeze(0))
@@ -64,7 +64,7 @@ def simple_test_2():
     t = time.time()
     r = w.run(data)
     t = time.time() - t
-    w.show_stat()
+    print(w.get_stat(), flush=True)
 
     g = w.join_result(r)
     if net.rank == 0:
@@ -101,7 +101,7 @@ def big_test(nh, nw):
     t = time.time()
     r = w.run(data)
     t = time.time() - t
-    w.show_stat()
+    print(w.get_stat(), flush=True)
 
     g = w.join_result(r)
     if net.rank == 0:
@@ -159,7 +159,7 @@ def general_worker_run(nh, nw, inshape, model_t):
     t = time.time()
     r = w.run(data)
     t = time.time() - t
-    w.show_stat()
+    print(w.get_stat(), flush=True)
 
     g = w.join_result(r)
     if net.rank == 0:
@@ -193,61 +193,16 @@ def test_case2(nh=2, nw=2):
                             nn.Linear(100, 10))
     general_worker_run(nh, nw, inshape, model_t)
 
-def test_alex(nh=2, nw=2):
-    inshape = (3, 227, 227)
-    # 3*227*227 -conv(11, 4)-> 96*55*55 -max(3,2)-> 96*27*27
-    # -conv(5,1,2)-> 256*27*27 -max(3,2)-> 256*13*13
-    # -conv(3,1,1)-> 384*13*13
-    # -conv(3,1,1)-> 384*13*13
-    # -conv(3,1,1)-> 256*13*13 -max(3,2)-> 256*6*6
-    # -fc-> 4096 -fc-> 4096 -fc-> 1000
-    model_t = nn.Sequential(
-        nn.Conv2d(3, 96, 11, 4), nn.ReLU(), nn.MaxPool2d(3, 2),
-        nn.Conv2d(256, 96, 5, 1, 2), nn.ReLU(), nn.MaxPool2d(3, 2),
-        nn.Conv2d(256, 384, 3, 1, 1), nn.ReLU(),
-        nn.Conv2d(384, 384, 3, 1, 1), nn.ReLU(),
-        nn.Conv2d(384, 256, 3, 1, 1), nn.ReLU(), nn.MaxPool2d(3, 2),
-        nn.Flatten(),
-        nn.Linear(4096, 4096), nn.ReLU(),
-        nn.Linear(4096, 4096), nn.ReLU(),
-        nn.Linear(4096, 1000))
+def test_case3(nh=2, nw=2):
+    inshape = (1, 640, 640)
+    model_t = nn.Sequential(nn.Conv2d(1, 3, 4, 4), nn.ReLU(),
+                            nn.Conv2d(3, 6, 4, 4), nn.ReLU(),
+                            nn.Conv2d(6, 12, 4, 4), nn.ReLU(),
+                            nn.Flatten(),
+                            nn.Linear(1200, 100), nn.ReLU(),
+                            nn.Linear(100, 10))
     general_worker_run(nh, nw, inshape, model_t)
 
-def test_vgg(nh=2, nw=2, layers=16):
-    inshape = (3, 224, 224)
-    def make_block(inch, outch, n):
-        l = [nn.Conv2d(inch, outch, 3, 1, 1)]
-        l += [nn.Conv2d(outch, outch, 3, 1, 1) for i in range(n-1)]
-        l += [nn.MaxPool2d(2, 2)]
-        return l
-    # 3*224*224 -conv*-> 64*224*224 -max-> 128*112*112
-    # -conv-> 256*112*112 -conv-> 256*112*112 -max-> 256*56*56
-    # -conv-> 512*56*56 -conv*-> 512*56*56 -max-> 512*28*28
-    # -conv-> 512*28*28 -conv*-> 512*28*28 -max-> 512*14*14
-    # -conv-> 512*14*14 -conv*-> 512*14*14 -max-> 512*7*7
-    # -fc-> 4096 -fc-> 4096 -fc-> 1000
-    if layers == 11:
-        l = [*make_block(3, 64, 1), *make_block(64, 128, 1),
-             *make_block(128, 256, 2), *make_block(256, 512, 2),
-             *make_block(256, 512, 2)]
-    elif layers == 13:
-        l = [*make_block(3, 64, 2), *make_block(64, 128, 2),
-             *make_block(128, 256, 2), *make_block(256, 512, 2),
-             *make_block(256, 512, 2)]
-    elif layers == 16:
-        l = [*make_block(3, 64, 2), *make_block(64, 128, 2),
-             *make_block(128, 256, 3), *make_block(256, 512, 3),
-             *make_block(256, 512, 3)]
-    elif layers == 19:
-        l = [*make_block(3, 64, 2), *make_block(64, 128, 2),
-             *make_block(128, 256, 4), *make_block(256, 512, 4),
-             *make_block(256, 512, 4)]
-    model_t = nn.Sequential(
-        *l, nn.Flatten(),
-        nn.Linear(7*7*512, 4096), nn.ReLU(),
-        nn.Linear(4096, 4096), nn.ReLU(),
-        nn.Linear(4096, 1000))
-    general_worker_run(nh, nw, inshape, model_t)
 
 def main():
     torch.manual_seed(123)
@@ -267,16 +222,14 @@ def main():
         nh = int(sys.argv[2])
         nw = int(sys.argv[3])
         assert nh*nw == net.size
-        if c == '1':
+        if c == 'basic':
+            basic_test()
+        elif c == '1':
             test_case1(nh, nw)
         elif c == '2':
             test_case2(nh, nw)
-        elif c == 'alex':
-            test_alex(nh, nw)
-        elif c.startswith('vgg-'):
-            v = int(c[4:])
-            assert v in [11, 13, 16, 19]
-            test_vgg(nh, nw, v)
+        elif c == '3':
+            test_case3(nh, nw)
         else:
             print(f"test case {c} not supported")
     else:

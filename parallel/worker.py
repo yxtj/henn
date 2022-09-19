@@ -107,7 +107,7 @@ class Worker:
         res = self.model[-1].global_result(xmat)
         return res
 
-    def show_stat(self):
+    def get_stat(self):
         s = f"Statistics: worker {self.hid}-{self.wid} (w{self.sid}):\n"\
             f"  send {self.stat_send_msg} messages, {self.stat_send_byte} bytes; "\
             f"recv {self.stat_recv_msg} messages, {self.stat_recv_byte} bytes;\n"\
@@ -117,7 +117,8 @@ class Worker:
             f"    postprocess time: {self.stat_time_layer_postprocess};\n"\
             f"  synchronization time: {self.stat_time_sync}, "\
             f"send time: {self.stat_time_send}, recv time: {self.stat_time_recv}"
-        print(s, flush=True)
+        #print(s, flush=True)
+        return s
 
     # inner functions - model prepare
 
