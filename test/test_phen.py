@@ -61,6 +61,22 @@ def test_relu():
     print("  difference:",diff)
 
 
+def test_pool():
+    pool_t = nn.AvgPool2d(2, 4, 1)
+    pool_h = hnt.make_pool(pool_t)
+    pool_p = pn.PhenAvgPool(1, 1, 0, 0, pool_h)
+
+    diff = []
+    for i in range(10):
+        x = torch.rand((2,10,10))
+        ot = pool_t(x.unsqueeze(0))
+        op = pool_p(x.numpy())
+        d = np.abs(ot[0].detach().numpy()-op).mean()
+        diff.append(d)
+    print("Avg-Pool correct:", np.all(np.abs(diff)<1e-4))
+    print("  difference:",diff)
+
+
 # %% parallelization of one layer
 
 def parallel_linear(nh=2, nw=2, nchin=100, nchout=10):
@@ -135,6 +151,51 @@ def parallel_conv(nh=2, nw=2, ks=3, stride=1, pad=0, sz=10):
     print("  difference:",diff)
 
 
+def parallel_pool(nh=2, nw=2, ks=3, stride=1, pad=0, sz=10):
+    pool_t = nn.AvgPool2d(ks, stride, pad)
+    pool_h = hnt.make_pool2d(pool_t)
+    pools = [[pn.PhenAvgPool(nh, nw, hid, wid, pool_h) for wid in range(nw)]
+          for hid in range(nh)]
+
+    psx = sz + 2*pad
+    psy = sz + 2*pad
+    indh = np.linspace(0, psx, nh+1, dtype=int)
+    indw = np.linspace(0, psy, nw+1, dtype=int)
+    # guarantees that indh[i] is the first position with an output
+    if stride != 1:
+        for i in range(nh):
+            q, r = divmod(indh[i], stride)
+            if r != 0:
+                indh[i] = (q+1)*stride
+        for i in range(nw):
+            q, r = divmod(indw[i], stride)
+            if r != 0:
+                indw[i] = (q+1)*stride
+
+    diff = []
+    for _ in range(10):
+        x = torch.rand((2, sz, sz))
+        ot = pool_t(x.unsqueeze(0))[0].detach().numpy()
+        xp = computil.pad_data(x.numpy(), pad)
+        ops = np.empty((nh, nw), dtype=object)
+        for hid in range(nh):
+            for wid in range(nw):
+                pool = pools[hid][wid]
+                #h1, h2 = indh[hid], min(psx, indh[hid+1]+ks-1)
+                #w1, w2 = indw[wid], min(psy, indw[wid+1]+ks-1)
+                h1, h2 = indh[hid], min(psx, indh[hid+1]-stride+1+ks-1)
+                w1, w2 = indw[wid], min(psy, indw[wid+1]-stride+1+ks-1)
+                cut = xp[:, h1:h2, w1:w2]
+                #print(hid, wid, 'h:',h1,h2,'w:',w1,w2, 'shape:', cut.shape)
+                o = pool.local_forward(cut)
+                ops[hid,wid] = o
+        op = np.concatenate([np.concatenate(ops[i,:],2) for i in range(nh)], 1)
+        d = np.abs(ot-op).mean()
+        diff.append(d)
+    print(f"Parallel {nh}x{nw}: Pool kernel-{ks}, stride-{stride}, pad-{pad}, correct:", np.all(np.abs(diff)<1e-4))
+    print("  difference:",diff)
+
+
 def parallel_act1(nh=2, nw=2, size=10):
     act_t = nn.ReLU()
     acts = [[pn.PhenReLU(nh, nw, hid, wid) for wid in range(nw)]
@@ -188,9 +249,10 @@ def parallel_act2(nh=2, nw=2, szx=10, szy=10):
 # %% main
 
 def correct_test():
-    #test_linear()
-    #test_conv()
+    test_linear()
+    test_conv()
     test_relu()
+    test_pool()
 
 def linear_test():
     parallel_linear(2, 2, 100, 10)
@@ -204,6 +266,9 @@ def conv_test():
     parallel_conv(2, 2, 3, 2, 0, 10)
     parallel_conv(2, 2, 3, 2, 1, 10)
 
+def pool_test():
+    parallel_pool(2, 2, 3, 1, 0, 9)
+
 def act_test():
     parallel_act1(2, 2, 10)
     parallel_act1(3, 3, 10)
@@ -211,6 +276,8 @@ def act_test():
     parallel_act2(3, 3, 10, 10)
 
 def main():
+    test_pool()
+
     # correctness
     correct_test()
 
