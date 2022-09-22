@@ -3,44 +3,24 @@
 import numpy as np
 import heutil
 
-# %% convolution related
 
-class Conv2dConf():
-    def __init__(self, in_ch, out_ch, kernel_size,
-                 stride=1, padding=0, groups=1):
+class Pool2dConf():
+    def __init__(self, kernel_size, stride=1, padding=0):
         '''
-        in_ch/out_ch: integer, number of input/output channel
         kernel_size: integer or pair of integer, the kernel size in 2D plain
         stride: integer or integer pair, step size of the moving window
         padding: integer or integer pair, step size of the moving window
-        groups: integer, number of group (x-channel operation are within a group)
-        -------
-        in_ch/groups must be an integer.
-        weight must be of size (out_ch, in_ch/groups, kernel_size[0], kernel_size[1]).
-        bias must be of size (in_ch/groups)
         '''
         if isinstance(kernel_size, int):
             kernel_size = (kernel_size, kernel_size)
+        assert isinstance(kernel_size, tuple) and len(kernel_size) == 2
         self.kernel_size = kernel_size
-        self.nelem = in_ch*kernel_size[0]*kernel_size[1]
-        self.factor = 1.0 / self.nelem
         if isinstance(stride, int):
             stride = (stride, stride)
         self.stride = stride
         if isinstance(padding, int):
             padding = (padding, padding)
         self.padding = padding
-        self.in_ch = in_ch
-        self.out_ch = out_ch
-        self.groups = groups
-        assert in_ch % groups == 0
-        self.in_ch_pg = in_ch // groups # in channles per group
-        self.out_ch_pg = out_ch // groups
-
-    def check(self, weight, bias):
-        assert weight.shape == (self.out_ch, self.in_ch_pg, *self.kernel_size)
-        if bias:
-            assert bias.shape == (self.out_ch)
 
     def comp_out_size(self, sx:int, sy:int, padded:bool=False):
         '''
@@ -86,14 +66,14 @@ class Conv2dConf():
                 cy = cy if offset[1] < 0 else cy + 1
             return cx, cy
 
-    def comp_in_size(self, sx:int, sy:int, with_pad:bool=False):
+    def comp_in_size(self, osx:int, osy:int, with_pad:bool=False):
         '''
         Compute the input size given the output size.
         When stride is not 1, returns the minimum input size.
         "with_pad" controls wether the return size includes the padding pixels.
         '''
-        isx = (sx-1)*self.stride[0] + self.kernel_size[0]
-        isy = (sy-1)*self.stride[1] + self.kernel_size[1]
+        isx = (osx-1)*self.stride[0] + self.kernel_size[0]
+        isy = (osy-1)*self.stride[1] + self.kernel_size[1]
         if not with_pad:
             isx -= 2*self.padding[0]
             isy -= 2*self.padding[1]
@@ -110,6 +90,38 @@ class Conv2dConf():
             ix -= self.padding[0]
             iy -= self.padding[1]
         return ix, iy
+
+
+# %% convolution related
+
+class Conv2dConf(Pool2dConf):
+    def __init__(self, in_ch, out_ch, kernel_size,
+                 stride=1, padding=0, groups=1):
+        '''
+        in_ch/out_ch: integer, number of input/output channel
+        kernel_size: integer or pair of integer, the kernel size in 2D plain
+        stride: integer or integer pair, step size of the moving window
+        padding: integer or integer pair, step size of the moving window
+        groups: integer, number of group (x-channel operation are within a group)
+        -------
+        in_ch/groups must be an integer.
+        weight must be of size (out_ch, in_ch/groups, kernel_size[0], kernel_size[1]).
+        bias must be of size (in_ch/groups)
+        '''
+        super().__init__(kernel_size, stride, padding)
+        self.nelem = in_ch*kernel_size[0]*kernel_size[1]
+        self.factor = 1.0 / self.nelem
+        self.in_ch = in_ch
+        self.out_ch = out_ch
+        self.groups = groups
+        assert in_ch % groups == 0
+        self.in_ch_pg = in_ch // groups # in channles per group
+        self.out_ch_pg = out_ch // groups
+
+    def check(self, weight, bias):
+        assert weight.shape == (self.out_ch, self.in_ch_pg, *self.kernel_size)
+        if bias:
+            assert bias.shape == (self.out_ch)
 
 
 def conv2d(x, conf:Conv2dConf, weight, bias, doPad=True):
