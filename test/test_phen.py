@@ -153,38 +153,33 @@ def parallel_conv(nh=2, nw=2, ks=3, stride=1, pad=0, sz=10):
 
 def parallel_pool(nh=2, nw=2, ks=3, stride=1, pad=0, sz=10):
     pool_t = nn.AvgPool2d(ks, stride, pad)
-    pool_h = hnt.make_pool2d(pool_t)
+    pool_h = hnt.make_pool(pool_t)
     pools = [[pn.PhenAvgPool(nh, nw, hid, wid, pool_h) for wid in range(nw)]
           for hid in range(nh)]
 
-    psx = sz + 2*pad
-    psy = sz + 2*pad
+    psx = sz# + 2*pad
+    psy = sz# + 2*pad
     indh = np.linspace(0, psx, nh+1, dtype=int)
     indw = np.linspace(0, psy, nw+1, dtype=int)
-    # guarantees that indh[i] is the first position with an output
-    if stride != 1:
-        for i in range(nh):
-            q, r = divmod(indh[i], stride)
-            if r != 0:
-                indh[i] = (q+1)*stride
-        for i in range(nw):
-            q, r = divmod(indw[i], stride)
-            if r != 0:
-                indw[i] = (q+1)*stride
 
     diff = []
     for _ in range(10):
         x = torch.rand((2, sz, sz))
         ot = pool_t(x.unsqueeze(0))[0].detach().numpy()
-        xp = computil.pad_data(x.numpy(), pad)
+        #xp = computil.pad_data(x.numpy(), pad)
+        xp = x.detach().numpy()
         ops = np.empty((nh, nw), dtype=object)
         for hid in range(nh):
+            h1 = indh[hid]
+            r = (indh[hid+1]+pad)%stride
+            h2 = min(psx, indh[hid+1] - (r if r !=0 else stride) + ks)
             for wid in range(nw):
                 pool = pools[hid][wid]
                 #h1, h2 = indh[hid], min(psx, indh[hid+1]+ks-1)
                 #w1, w2 = indw[wid], min(psy, indw[wid+1]+ks-1)
-                h1, h2 = indh[hid], min(psx, indh[hid+1]-stride+1+ks-1)
-                w1, w2 = indw[wid], min(psy, indw[wid+1]-stride+1+ks-1)
+                w1 = indw[wid]
+                r = (indw[wid+1]+pad)%stride
+                w2 = min(psy, indw[wid+1] - (r if r !=0 else stride) + ks)
                 cut = xp[:, h1:h2, w1:w2]
                 #print(hid, wid, 'h:',h1,h2,'w:',w1,w2, 'shape:', cut.shape)
                 o = pool.local_forward(cut)
@@ -251,8 +246,8 @@ def parallel_act2(nh=2, nw=2, szx=10, szy=10):
 def correct_test():
     test_linear()
     test_conv()
-    test_relu()
     test_pool()
+    test_relu()
 
 def linear_test():
     parallel_linear(2, 2, 100, 10)
@@ -267,7 +262,13 @@ def conv_test():
     parallel_conv(2, 2, 3, 2, 1, 10)
 
 def pool_test():
-    parallel_pool(2, 2, 3, 1, 0, 9)
+    #parallel_pool(2, 2, 3, 1, 0, 9)
+    #parallel_pool(2, 2, 3, 1, 0, 10)
+    parallel_pool(2, 2, 3, 1, 1, 10)
+    parallel_pool(2, 2, 3, 2, 0, 10)
+    parallel_pool(2, 2, 3, 3, 0, 10)
+    parallel_pool(2, 2, 3, 3, 1, 10)
+    parallel_pool(3, 3, 3, 1, 0, 10)
 
 def act_test():
     parallel_act1(2, 2, 10)
@@ -276,8 +277,6 @@ def act_test():
     parallel_act2(3, 3, 10, 10)
 
 def main():
-    test_pool()
-
     # correctness
     correct_test()
 
@@ -286,6 +285,9 @@ def main():
 
     # parallel conv
     conv_test()
+
+    # parallel pool
+    pool_test()
 
     # parallel activation
     act_test()
