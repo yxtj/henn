@@ -33,6 +33,10 @@ class PhenLayer():
                 self.dim = 1
             elif self.ltype == "conv":
                 self.dim = 2
+            elif self.ltype.endswith("-pool"):
+                self.dim = 2
+            #elif self.ltype.endswith("-pool1d"):
+            #    self.dim = 1
             elif self.ltype == "flatten":
                 self.dim = 2
             elif self.ltype == "identity":
@@ -55,6 +59,10 @@ class PhenLayer():
 
     def __call__(self, x:np.ndarray):
         return self.local_forward(x)
+
+    def is_edge(self):
+        return self.hid == 0 or self.wid == 0 \
+            or self.hid == self.nh-1 or self.wid == self.nw-1
 
     # workflow: depend -> local_forward -> join
 
@@ -167,37 +175,10 @@ class PhenLayer():
     def out_shape_local(self):
         self.oshaper.get_shape(self.hid, self.wid)
 
-# %% convolution layer
 
-# Need to re-partition data after one conv
-# e.g. conv with kernel size 3 for 0-5, with 2 workers:
-# input cut: [0, 1, 2], [3, 4, 5]
-# fill dependent: [0, 1, 2, 3, 4], [3, 4, 5]
-# output: [0, 1, 2], [3]
-# inbalance we need to move 2 to worker-2
-# expected input for next conv; [0, 1], [2, 3]
+# %% 2d bases
 
-class PhenConv(PhenLayer):
-    def __init__(self, nh, nw, hid, wid, conv:hennlayer.Conv2d, name=None):
-        super().__init__(nh, nw, hid, wid, "conv", name)
-        self.conf = computil.Conv2dConf(conv.in_ch, conv.out_ch, conv.kernel_size,
-                                        conv.stride, conv.padding, conv.groups)
-        self.weight = conv.weight
-        self.bias = conv.bias
-
-    def bind_in_model(self, ishaper:Shaper, oshaper:Shaper,
-                      idx:int, gshapes:list[tuple], layer_types:list[str]):
-        assert ishaper.dim() == 2
-        assert oshaper.dim() == 2
-        super().bind_in_model(ishaper, oshaper, idx, gshapes, layer_types)
-        # inputs:
-        # global coordinate of the upper left pixel (inclusive)
-        inbox = self.ishaper.get_range(self.hid, self.wid)
-        self.gi_ul = (inbox[0], inbox[1])
-        # global coordinate of the lower right pixel (exclusive)
-        self.gi_lr = (inbox[2], inbox[3])
-
-    # helpers
+class Phen2DBase(PhenLayer):
 
     def _calc_depend_hw_(self, hid, wid):
         if hid == self.hid and self.wid == wid:
@@ -246,7 +227,7 @@ class PhenConv(PhenLayer):
             f"p{hid}-{wid}: ul {oul}, lr {olr}"
         return (*oul, *olr)
 
-    # depend for Conv: copy dependent data
+    # depend: copy dependent data
 
     def depend_out(self, x:np.ndarray):
         box = self.ishaper.get_range(self.hid, self.wid)
@@ -309,27 +290,6 @@ class PhenConv(PhenLayer):
         # merge data
         res = np.concatenate(
             [ np.concatenate(xmat[i,:],2) for i in range(nh) ], 1)
-        return res
-
-    def local_forward(self, x:np.ndarray):
-        # padding
-        if self.conf.padding != (0, 0):
-            x = computil.pad_data(x, self.conf.padding, self.wid==0, self.hid==0,
-                                  self.wid==self.nw-1, self.hid==self.nh-1)
-        # convolute
-        itop, ileft = self.ishaper.get_offset(self.hid, self.wid)
-        if itop % self.conf.stride[0] == 0:
-            h = 0
-        else:
-            h = self.conf.stride[0] - itop % self.conf.stride[0]
-        if ileft % self.conf.stride[0] == 0:
-            w = 0
-        else:
-            w = self.conf.stride[1] - ileft % self.conf.stride[1]
-        x = x[:, h:, w:]
-        res = computil.conv2d(x, self.conf, self.weight, self.bias, False)
-        if __DEBUG__:
-            time.sleep(res.size*np.prod(self.conf.kernel_size)*TIME_MA)
         return res
 
     # join of Conv: balance the output
@@ -408,6 +368,58 @@ class PhenConv(PhenLayer):
             [ np.concatenate(xmat[i,:],2) for i in range(nh) ], 1)
         return res
 
+
+# %% convolution layer
+
+# Need to re-partition data after one conv
+# e.g. conv with kernel size 3 for 0-5, with 2 workers:
+# input cut: [0, 1, 2], [3, 4, 5]
+# fill dependent: [0, 1, 2, 3, 4], [3, 4, 5]
+# output: [0, 1, 2], [3]
+# inbalance we need to move 2 to worker-2
+# expected input for next conv; [0, 1], [2, 3]
+
+class PhenConv(Phen2DBase):
+    def __init__(self, nh, nw, hid, wid, conv:hennlayer.Conv2d, name=None):
+        super().__init__(nh, nw, hid, wid, "conv", name)
+        self.conf = computil.Conv2dConf(conv.in_ch, conv.out_ch, conv.kernel_size,
+                                        conv.stride, conv.padding, conv.groups)
+        self.weight = conv.weight
+        self.bias = conv.bias
+
+    def bind_in_model(self, ishaper:Shaper, oshaper:Shaper,
+                      idx:int, gshapes:list[tuple], layer_types:list[str]):
+        assert ishaper.dim() == 2
+        assert oshaper.dim() == 2
+        super().bind_in_model(ishaper, oshaper, idx, gshapes, layer_types)
+        # inputs:
+        # global coordinate of the upper left pixel (inclusive)
+        inbox = self.ishaper.get_range(self.hid, self.wid)
+        self.gi_ul = (inbox[0], inbox[1])
+        # global coordinate of the lower right pixel (exclusive)
+        self.gi_lr = (inbox[2], inbox[3])
+
+    def local_forward(self, x:np.ndarray):
+        # padding
+        if self.conf.padding != (0, 0):
+            x = computil.pad_data(x, self.conf.padding, self.wid==0, self.hid==0,
+                                  self.wid==self.nw-1, self.hid==self.nh-1)
+        # convolute
+        itop, ileft = self.ishaper.get_offset(self.hid, self.wid)
+        if itop % self.conf.stride[0] == 0:
+            h = 0
+        else:
+            h = self.conf.stride[0] - itop % self.conf.stride[0]
+        if ileft % self.conf.stride[0] == 0:
+            w = 0
+        else:
+            w = self.conf.stride[1] - ileft % self.conf.stride[1]
+        x = x[:, h:, w:]
+        res = computil.conv2d(x, self.conf, self.weight, self.bias, False)
+        if __DEBUG__:
+            time.sleep(res.size*np.prod(self.conf.kernel_size)*TIME_MA)
+        return res
+
     def global_result(self, xmat:np.ndarray):
         assert xmat.ndim == 2
         assert xmat.shape == (self.nh, self.nw)
@@ -425,6 +437,53 @@ class PhenConv(PhenLayer):
         ox, oy = self.conf.comp_out_size(inshape[1], inshape[2])
         return (self.conf.out_ch, ox, oy)
 
+# %% pooling layer
+
+class PhenAvgPool(PhenLayer):
+    def __init__(self, nh, nw, hid, wid, layer:hennlayer.AvgPool2d, name=None):
+        super().__init__(nh, nw, hid, wid, 'avg-pool', name)
+        self.conf = computil.Pool2dConf(layer.kernel_size, layer.stride,
+                                        layer.padding)
+        self.factor = 1.0/np.prod(self.conf.kernel_size)
+
+    def local_forward(self, x:np.ndarray):
+        # padding
+        if self.conf.padding != (0, 0) and self.is_edge():
+            x = computil.pad_data(x, self.conf.padding, self.wid==0, self.hid==0,
+                                  self.wid==self.nw-1, self.hid==self.nh-1)
+        # pooling
+        isc, isx, isy = x.shape
+        osx, osy = self.conf.comp_out_size(isx, isy, True)
+        end_i = isx - self.conf.kernel_size[0] + 1
+        end_j = isy - self.conf.kernel_size[1] + 1
+        out = np.empty((isc, osx, osy), dtype=x.dtype)
+        for c in range(isc):
+            oi = 0
+            for i in range(0, end_i, self.conf.stride[0]):
+                oj = 0
+                i2 = i+self.conf.kernel_size[0]
+                for j in range(0, end_j, self.conf.stride[1]):
+                    d = x[c, i:i2, j:j+self.conf.kernel_size[1]]
+                    out[c, oi, oj] = heutil.hesum(d.ravel())*self.factor
+                    oj += 1
+                oi += 1
+        return out
+
+    def global_result(self, xmat:np.ndarray):
+        assert xmat.ndim == 2
+        assert xmat.shape == (self.nh, self.nw)
+        assert xmat[0,0].shape[0] == self.conf.out_ch
+        res = np.concatenate(
+            [ np.concatenate(xmat[i,:],2) for i in range(self.nh) ], 1)
+        return res
+
+    def in_shape(self):
+        return (self.in_ch, None, None)
+
+    def out_shape(self, inshape:tuple):
+        assert len(inshape) == 3
+        ox, oy = self.conf.comp_out_size(inshape[1], inshape[2])
+        return (inshape[0], ox, oy)
 
 # %% fully connected layer
 
@@ -550,11 +609,10 @@ class PhenFlatten(PhenLayer):
         o = np.prod(inshape)
         return (o, )
 
-
 # %% identity layer
 
 class PhenIdentity(PhenLayer):
-    def __init__(self, nh, nw, hid, wid, name=None):
+    def __init__(self, nh, nw, hid, wid, ks, stride, pad, name=None):
         super().__init__(nh, nw, hid, wid, "identity", name)
 
     def local_forward(self, x:np.ndarray):
