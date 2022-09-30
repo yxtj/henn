@@ -14,11 +14,11 @@ import computil
 from collections import defaultdict
 
 
-def compute_model_meta(nh:int, nw:int, model:list[pn.PhenLayer], inshape:tuple):
+def compute_model_meta(nc:int, nh:int, nw:int, model:list[pn.PhenLayer], inshape:tuple):
     gshapes = [ inshape ]
     if isinstance(inshape, int):
         inshape = (inshape, )
-    shapers = [ make_shaper(nh, nw, min(2, len(inshape)), inshape) ]
+    shapers = [ make_shaper(nc, nh, nw, min(2, len(inshape)), inshape) ]
     layer_types = []
     s = inshape
     for lyr in model:
@@ -27,11 +27,11 @@ def compute_model_meta(nh:int, nw:int, model:list[pn.PhenLayer], inshape:tuple):
         t = lyr.ltype
         layer_types.append(t)
         if t == "conv":
-            ss = make_shaper(nh, nw, 2, s)
+            ss = make_shaper(nc, nh, nw, 2, s)
         elif t == 'linear':
-            ss = make_shaper(nh, nw, 1, s)
+            ss = make_shaper(nc, nh, nw, 1, s)
         elif t == 'flatten':
-            ss = make_shaper(nh, nw, 1, s)
+            ss = make_shaper(nc, nh, nw, 1, s)
         shapers.append(ss)
     return gshapes, shapers, layer_types
 
@@ -232,8 +232,8 @@ def connect_conv_linear(nh, nw):
 
 # %% message-based general model runner
 
-def communication_template(nh, nw, inshape, model_t, model_p, ntrails=10):
-    gshapes, shapers, layer_types = compute_model_meta(nh, nw, model_p[0][0], inshape)
+def communication_template(nc, nh, nw, inshape, model_t, model_p, ntrails=10):
+    gshapes, shapers, layer_types = compute_model_meta(nc, nh, nw, model_p[0][0], inshape)
     print(gshapes)
     #print(shapers)
     print(layer_types)
@@ -244,6 +244,7 @@ def communication_template(nh, nw, inshape, model_t, model_p, ntrails=10):
                 model_p[hid][wid][lid].bind_in_model(shapers[lid], shapers[lid+1],
                                                      lid, gshapes, layer_types)
 
+    cid = 0
     diff = []
     for i in range(ntrails):
         x = torch.rand(inshape)
@@ -259,7 +260,7 @@ def communication_template(nh, nw, inshape, model_t, model_p, ntrails=10):
         ips = np.empty((nh, nw), dtype=np.ndarray)
         for hid in range(nh):
             for wid in range(nw):
-                ips[hid, wid] = shapers[0].pick_data(hid, wid, xp)
+                ips[hid, wid] = shapers[0].pick_data(cid, hid, wid, xp)
         ops = np.empty((nh, nw), dtype=np.ndarray)
         d = []
         for lid in range(len(model_p[0][0])):
@@ -273,17 +274,17 @@ def communication_template(nh, nw, inshape, model_t, model_p, ntrails=10):
                     m = model_p[hid][wid][lid]
                     lx = ips[hid, wid]
                     reqs = m.depend_out(lx)
-                    for th, tw, desc in reqs:
-                        msg = m.depend_message(lx, th, tw, desc)
-                        buffer[(th, tw)].append((hid, wid, msg))
+                    for tc, th, tw, desc in reqs:
+                        msg = m.depend_message(lx, tc, th, tw, desc)
+                        buffer[(th, tw)].append((cid, hid, wid, msg))
             #print("prepare-merge")
             # depend - recv and merge
             for hid in range(nh):
                 for wid in range(nw):
                     #print(hid, wid)
                     m = model_p[hid][wid][lid]
-                    dep_s = [(h, w) for h, w, d in m.depend_in(ips[hid,wid])]
-                    dep_r = [(h, w) for h, w, d in buffer[(hid, wid)]]
+                    dep_s = [(c, h, w) for c, h, w, d in m.depend_in(ips[hid,wid])]
+                    dep_r = [(c, h, w) for c, h, w, d in buffer[(hid, wid)]]
                     assert sorted(dep_s) == sorted(dep_r), f"s:{dep_s}, r:{dep_r}"
                     lm = m.depend_merge(ips[(hid, wid)], buffer[(hid, wid)])
                     ips[(hid, wid)] = lm
@@ -298,9 +299,9 @@ def communication_template(nh, nw, inshape, model_t, model_p, ntrails=10):
                     # send
                     reqs = m.join_out(lo)
                     #print(hid, wid, lo.shape, reqs)
-                    for th, tw, desc in reqs:
-                        msg = m.join_message(lo, th, tw, desc)
-                        buffer[(th, tw)].append((hid, wid, msg))
+                    for tc, th, tw, desc in reqs:
+                        msg = m.join_message(lo, tc, th, tw, desc)
+                        buffer[(th, tw)].append((cid, hid, wid, msg))
             # join - recv and merge
             #print("join")
             for hid in range(nh):
@@ -308,8 +309,8 @@ def communication_template(nh, nw, inshape, model_t, model_p, ntrails=10):
                     m = model_p[hid][wid][lid]
                     reqs = m.join_in(ops[hid,wid])
                     #print(hid, wid, reqs)
-                    dep_s = [(h, w) for h, w, d in reqs]
-                    dep_r = [(h, w) for h, w, d in buffer[(hid, wid)]]
+                    dep_s = [(c, h, w) for c, h, w, d in reqs]
+                    dep_r = [(c, h, w) for c, h, w, d in buffer[(hid, wid)]]
                     assert sorted(dep_s) == sorted(dep_r), f"s:{dep_s}, r:{dep_r}"
                     ips[hid, wid] = m.join_merge(ops[hid, wid], buffer[(hid, wid)])
                     #print(m.oshaper.get_shape(hid, wid), ips[hid, wid].shape)
@@ -497,7 +498,7 @@ def model_conv_relu_linear(nh, nw):
     print("  difference:", np.array(diff))
 
 
-def model_big_2c2l(nh, nw):
+def model_big_2c2l(nc, nh, nw):
     inshape = (1, 202, 202)
 
     conv1_t = nn.Conv2d(1, 3, 4, 4)
@@ -512,41 +513,42 @@ def model_big_2c2l(nh, nw):
     fc1_h = hnt.make_linear(fc1_t)
     fc2_h = hnt.make_linear(fc2_t)
 
-    def make_phen_model(nh, nw, hid, wid, inshape:tuple, model_t:nn.Sequential):
+    def make_phen_model(nc, nh, nw, cid, hid, wid, inshape:tuple, model_t:nn.Sequential):
         res = []
         for i, m in enumerate(model_t):
             if isinstance(m, nn.Conv2d):
                 mh = hnt.make_layer(m)
-                mp = pn.PhenConv(nh, nw, hid, wid, mh)
+                mp = pn.PhenConv(nc, nh, nw, cid, hid, wid, mh)
             elif isinstance(m, nn.Linear):
                 mh = hnt.make_layer(m)
-                mp = pn.PhenLinear(nh, nw, hid, wid, mh)
+                mp = pn.PhenLinear(nc, nh, nw, cid, hid, wid, mh)
             elif isinstance(m, nn.ReLU):
-                mp = pn.PhenReLU(nh, nw, hid, wid)
+                mp = pn.PhenReLU(nc, nh, nw, cid, hid, wid)
             elif isinstance(m, nn.Flatten):
-                mp = pn.PhenFlatten(nh, nw, hid, wid)
+                mp = pn.PhenFlatten(nc, nh, nw, cid, hid, wid)
             else:
                 print(f'{i}-th layer {m} is not supported.')
             res.append(mp)
         return res
 
-    model_p = [[[pn.PhenConv(nh, nw, hid, wid, conv1_h),
-                 pn.PhenReLU(nh, nw, hid, wid),
-                 pn.PhenConv(nh, nw, hid, wid, conv2_h),
-                 pn.PhenReLU(nh, nw, hid, wid),
-                 pn.PhenFlatten(nh, nw, hid, wid),
-                 pn.PhenLinear(nh, nw, hid, wid, fc1_h),
-                 pn.PhenReLU(nh, nw, hid, wid),
-                 pn.PhenLinear(nh, nw, hid, wid, fc2_h)]
+    cid = 0
+    model_p = [[[pn.PhenConv(nc, nh, nw, cid, hid, wid, conv1_h),
+                 pn.PhenReLU(nc, nh, nw, cid, hid, wid),
+                 pn.PhenConv(nc, nh, nw, cid, hid, wid, conv2_h),
+                 pn.PhenReLU(nc, nh, nw, cid, hid, wid),
+                 pn.PhenFlatten(nc, nh, nw, cid, hid, wid),
+                 pn.PhenLinear(nc, nh, nw, cid, hid, wid, fc1_h),
+                 pn.PhenReLU(nc, nh, nw, cid, hid, wid),
+                 pn.PhenLinear(nc, nh, nw, cid, hid, wid, fc2_h)]
         for wid in range(nw)]
         for hid in range(nh)]
 
-    model_p = [[make_phen_model(nh, nw, hid, wid, inshape, model_t)
+    model_p = [[make_phen_model(nc, nh, nw, cid, hid, wid, inshape, model_t)
                 for wid in range(nw)]
                for hid in range(nh)]
 
-    diff = communication_template(nh, nw, inshape, model_t, model_p, 10)
-    print(f"Model {nh}x{nw} of conv-relu-linear: correct:",
+    diff = communication_template(nc, nh, nw, inshape, model_t, model_p, 10)
+    print(f"Model {nc}x{nh}x{nw} of 2c2l: correct:",
           np.all(np.abs(diff) < 1e-4))
     print("  difference:", np.array(diff))
 
@@ -580,7 +582,7 @@ def main():
 
     #communicate_model_stride(2,2,2)
 
-    model_big_2c2l(3, 3)
+    model_big_2c2l(1, 3, 3)
 
 
 if __name__ == "__main__":
