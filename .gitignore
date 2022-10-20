@@ -156,3 +156,4 @@ cython_debug/
 /pretrained/
 /data/
 /log/
+/reference/
