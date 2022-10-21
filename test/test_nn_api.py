@@ -7,7 +7,8 @@ import torch.nn as nn
 
 # %% define model
 
-def get_model_alex():
+def get_model_alex(conv=True, fc=True):
+    assert (conv or fc), 'the output should be non-empty'
     inshape = (3, 227, 227)
     # 3*227*227 -conv(11, 4)-> 96*55*55 -max(3,2)-> 96*27*27
     # -conv(5,1,2)-> 256*27*27 -max(3,2)-> 256*13*13
@@ -15,20 +16,42 @@ def get_model_alex():
     # -conv(3,1,1)-> 384*13*13
     # -conv(3,1,1)-> 256*13*13 -max(3,2)-> 256*6*6
     # -fc-> 4096 -fc-> 4096 -fc-> 1000
-    model_t = nn.Sequential(
-        nn.Conv2d(3, 96, 11, 4), nn.ReLU(), nn.MaxPool2d(3, 2),
-        nn.Conv2d(256, 96, 5, 1, 2), nn.ReLU(), nn.MaxPool2d(3, 2),
-        nn.Conv2d(256, 384, 3, 1, 1), nn.ReLU(),
-        nn.Conv2d(384, 384, 3, 1, 1), nn.ReLU(),
-        nn.Conv2d(384, 256, 3, 1, 1), nn.ReLU(), nn.MaxPool2d(3, 2),
-        nn.Flatten(),
-        nn.Linear(4096, 4096), nn.ReLU(),
-        nn.Linear(4096, 4096), nn.ReLU(),
-        nn.Linear(4096, 1000))
+    if conv:
+        l1 = [
+            nn.Conv2d(3, 96, 11, 4), nn.ReLU(), nn.MaxPool2d(3, 2),
+            nn.Conv2d(256, 96, 5, 1, 2), nn.ReLU(), nn.MaxPool2d(3, 2),
+            nn.Conv2d(256, 384, 3, 1, 1), nn.ReLU(),
+            nn.Conv2d(384, 384, 3, 1, 1), nn.ReLU(),
+            nn.Conv2d(384, 256, 3, 1, 1), nn.ReLU(), nn.MaxPool2d(3, 2)
+            ]
+    if fc:
+        l2 = [
+            nn.Linear(4096, 4096), nn.ReLU(),
+            nn.Linear(4096, 4096), nn.ReLU(),
+            nn.Linear(4096, 1000)
+            ]
+    if conv and fc:
+        model_t = nn.Sequential(*l1, nn.Flatten(), *l2)
+    elif conv:
+        model_t = nn.Sequential(*l1)
+    elif fc:
+        model_t = nn.Sequential(*l2)
+    # model_t = nn.Sequential(
+    #     nn.Conv2d(3, 96, 11, 4), nn.ReLU(), nn.MaxPool2d(3, 2),
+    #     nn.Conv2d(256, 96, 5, 1, 2), nn.ReLU(), nn.MaxPool2d(3, 2),
+    #     nn.Conv2d(256, 384, 3, 1, 1), nn.ReLU(),
+    #     nn.Conv2d(384, 384, 3, 1, 1), nn.ReLU(),
+    #     nn.Conv2d(384, 256, 3, 1, 1), nn.ReLU(), nn.MaxPool2d(3, 2),
+    #     nn.Flatten(),
+    #     nn.Linear(4096, 4096), nn.ReLU(),
+    #     nn.Linear(4096, 4096), nn.ReLU(),
+    #     nn.Linear(4096, 1000))
     return inshape, model_t
 
 
-def get_model_vgg(layers=16):
+def get_model_vgg(layers=16, conv=True, fc=True):
+    assert (conv or fc), 'the output should be non-empty'
+    assert layers in [11, 13, 16, 19]
     inshape = (3, 224, 224)
     def make_block(inch, outch, n):
         l = [nn.Conv2d(inch, outch, 3, 1, 1)]
@@ -41,27 +64,35 @@ def get_model_vgg(layers=16):
     # -conv-> 512*28*28 -conv*-> 512*28*28 -max-> 512*14*14
     # -conv-> 512*14*14 -conv*-> 512*14*14 -max-> 512*7*7
     # -fc-> 4096 -fc-> 4096 -fc-> 1000
-    if layers == 11:
-        l = [*make_block(3, 64, 1), *make_block(64, 128, 1),
-             *make_block(128, 256, 2), *make_block(256, 512, 2),
-             *make_block(256, 512, 2)]
-    elif layers == 13:
-        l = [*make_block(3, 64, 2), *make_block(64, 128, 2),
-             *make_block(128, 256, 2), *make_block(256, 512, 2),
-             *make_block(256, 512, 2)]
-    elif layers == 16:
-        l = [*make_block(3, 64, 2), *make_block(64, 128, 2),
-             *make_block(128, 256, 3), *make_block(256, 512, 3),
-             *make_block(256, 512, 3)]
-    elif layers == 19:
-        l = [*make_block(3, 64, 2), *make_block(64, 128, 2),
-             *make_block(128, 256, 4), *make_block(256, 512, 4),
-             *make_block(256, 512, 4)]
-    model_t = nn.Sequential(
-        *l, nn.Flatten(),
-        nn.Linear(7*7*512, 4096), nn.ReLU(),
-        nn.Linear(4096, 4096), nn.ReLU(),
-        nn.Linear(4096, 1000))
+    if conv:
+        if layers == 11:
+            l1 = [*make_block(3, 64, 1), *make_block(64, 128, 1),
+                 *make_block(128, 256, 2), *make_block(256, 512, 2),
+                 *make_block(512, 512, 2)]
+        elif layers == 13:
+            l1 = [*make_block(3, 64, 2), *make_block(64, 128, 2),
+                 *make_block(128, 256, 2), *make_block(256, 512, 2),
+                 *make_block(512, 512, 2)]
+        elif layers == 16:
+            l1 = [*make_block(3, 64, 2), *make_block(64, 128, 2),
+                 *make_block(128, 256, 3), *make_block(256, 512, 3),
+                 *make_block(512, 512, 3)]
+        elif layers == 19:
+            l1 = [*make_block(3, 64, 2), *make_block(64, 128, 2),
+                 *make_block(128, 256, 4), *make_block(256, 512, 4),
+                 *make_block(512, 512, 4)]
+    if fc:
+        l2 = [
+            nn.Linear(7*7*512, 4096), nn.ReLU(),
+            nn.Linear(4096, 4096), nn.ReLU(),
+            nn.Linear(4096, 1000)
+            ]
+    if conv and fc:
+        model_t = nn.Sequential(*l1, nn.Flatten(), *l2)
+    elif conv:
+        model_t = nn.Sequential(*l1)
+    elif fc:
+        model_t = nn.Sequential(*l2)
     return inshape, model_t
 
 # %% main
