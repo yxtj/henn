@@ -3,7 +3,7 @@
 import numpy as np
 import time
 from network import Network
-from .phenetwork import PhenLayer, PhenConv, PhenLinear, PhenFlatten, PhenReLU, PhenSquare
+from .phenetwork import PhenLayer, PhenConv, PhenAvgPool, PhenLinear, PhenFlatten, PhenReLU, PhenSquare
 from .shaper import make_shaper
 
 
@@ -79,6 +79,8 @@ class Worker:
             t = time.time()
             if isinstance(layer, PhenConv):
                 x = self.comp_conv(x, lid, layer)
+            elif isinstance(layer, PhenAvgPool):
+                x = self.comp_pool(x, lid, layer)
             elif isinstance(layer, PhenLinear):
                 x = self.comp_linear(x, lid, layer)
             elif isinstance(layer, PhenFlatten):
@@ -135,6 +137,8 @@ class Worker:
             layer_types.append(t)
             if t == "conv":
                 ss = make_shaper(self.nh, self.nw, 2, s)
+            elif t.endswith('-pool'):
+                ss = make_shaper(self.nh, self.nw, 2, s)
             elif t == 'linear':
                 ss = make_shaper(self.nh, self.nw, 1, s)
             elif t == 'flatten':
@@ -156,6 +160,23 @@ class Worker:
         x = self.postprocess(conv, x)
         t3 = time.time()
         print(f'  w{self.hid}-{self.wid}: L-{lid} conv-done', flush=True)
+        self.stat_time_layer_prepare[lid] = t1-t0
+        self.stat_time_layer_compute[lid] = t2-t1
+        self.stat_time_layer_postprocess[lid] = t3-t2
+        return x
+
+    def comp_pool(self, x, lid:int, pool:PhenAvgPool):
+        t0 = time.time()
+        print(f'  w{self.hid}-{self.wid}: L-{lid} pool-preprocess', flush=True)
+        x = self.preprocess(pool, x)
+        t1 = time.time()
+        print(f'  w{self.hid}-{self.wid}: L-{lid} pool-forward', flush=True)
+        x = pool.local_forward(x)
+        t2 = time.time()
+        print(f'  w{self.hid}-{self.wid}: L-{lid} pool-postprocess', flush=True)
+        x = self.postprocess(pool, x)
+        t3 = time.time()
+        print(f'  w{self.hid}-{self.wid}: L-{lid} pool-done', flush=True)
         self.stat_time_layer_prepare[lid] = t1-t0
         self.stat_time_layer_compute[lid] = t2-t1
         self.stat_time_layer_postprocess[lid] = t3-t2
