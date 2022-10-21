@@ -23,6 +23,8 @@ def make_layer(ref:nn.Module):
         return make_conv2d(ref)
     elif isinstance(ref, nn.AvgPool2d):
         return make_pool(ref)
+    elif isinstance(ref, nn.MaxPool2d):
+        return make_pool(ref)
     raise ValueError("Layer type",type(ref),"is not supported")
 
 

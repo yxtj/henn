@@ -22,6 +22,9 @@ def make_phen_model(nh:int, nw:int, hid:int, wid:int,
             mp = pn.PhenReLU(nh, nw, hid, wid)
         elif isinstance(m, nn.Flatten):
             mp = pn.PhenFlatten(nh, nw, hid, wid)
+        elif isinstance(m, (nn.MaxPool2d, nn.AvgPool2d)):
+            mh = hnt.make_layer(m)
+            mp = pn.PhenAvgPool(nh, nw, hid, wid, mh)
         else:
             print(f'{i}-th layer {m} is not supported.')
         res.append(mp)
@@ -33,6 +36,7 @@ def get_phen_model_info(model_p, inshape:tuple):
     ltypes = []
     s = inshape
     for i, m in enumerate(model_p):
+        #print(i, m, s)
         s = m.out_shape(s)
         shapes.append(s)
         ltypes.append(m.ltype)
