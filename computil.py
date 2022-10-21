@@ -22,6 +22,9 @@ class Pool2dConf():
             padding = (padding, padding)
         self.padding = padding
 
+    def __repr__(self):
+        return f'Pool2dConf: kernel={self.kernel_size}, stride={self.stride}, pad={self.padding}'
+
     def comp_out_size(self, sx:int, sy:int, padded:bool=False):
         '''
         Compute the output size given the input size.
@@ -117,6 +120,10 @@ class Conv2dConf(Pool2dConf):
         assert in_ch % groups == 0
         self.in_ch_pg = in_ch // groups # in channles per group
         self.out_ch_pg = out_ch // groups
+
+    def __repr__(self):
+        return f'Conv2dConf: in_ch={self.in_ch}, out_ch={self.out_ch}, ' +\
+            f'kernel={self.kernel_size}, stride={self.stride}, pad={self.padding}'
 
     def check(self, weight, bias):
         assert weight.shape == (self.out_ch, self.in_ch_pg, *self.kernel_size)

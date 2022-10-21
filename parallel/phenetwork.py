@@ -47,6 +47,9 @@ class PhenLayer():
                 self.dim = 0
         self.name = name
 
+    def _basic_repr_(self):
+        return f'{self.hid}x{self.wid} of {self.nh}x{self.nw}, name={self.name}'
+
     def bind_in_model(self, ishaper:Shaper, oshaper:Shaper,
                       idx:int, gshapes:list[tuple], layer_types:list[str]):
         self.ishaper = ishaper
@@ -57,8 +60,8 @@ class PhenLayer():
             self.name = str(idx)
         #self.layers = layer_types
 
-    def __call__(self, x:np.ndarray):
-        return self.local_forward(x)
+    #def __call__(self, x:np.ndarray):
+    #    return self.local_forward(x)
 
     def is_edge(self):
         return self.hid == 0 or self.wid == 0 \
@@ -387,6 +390,9 @@ class PhenConv(Phen2DBase):
         self.weight = conv.weight
         self.bias = conv.bias
 
+    def __repr__(self):
+        return 'PhenConv('+self._basic_repr_()+", "+self.conf.__repr__()[12:]+")"
+
     def bind_in_model(self, ishaper:Shaper, oshaper:Shaper,
                       idx:int, gshapes:list[tuple], layer_types:list[str]):
         assert ishaper.dim() == 2
@@ -445,6 +451,9 @@ class PhenAvgPool(PhenLayer):
         self.conf = computil.Pool2dConf(layer.kernel_size, layer.stride,
                                         layer.padding)
         self.factor = 1.0/np.prod(self.conf.kernel_size)
+
+    def __repr__(self):
+        return 'PhenAvgPool('+self._basic_repr_()+", "+self.conf.__repr__()[12:]+")"
 
     def local_forward(self, x:np.ndarray):
         # padding
@@ -508,6 +517,10 @@ class PhenLinear(PhenLayer):
         else:
             self.local_bias = np.zeros((self.out_ch))
             self.local_bias[self.pid::self.npart] = self.bias[self.pid::self.npart]
+
+    def __repr__(self):
+        return 'PhenLinear('+self._basic_repr_()+\
+            f", in_ch={self.in_ch}, out_ch={self.out_ch}, bias={self.bias is not None})"
 
     def bind_in_model(self, ishaper:Shaper, oshaper:Shaper,
                       idx:int, gshapes:list[tuple], layer_types:list[str]):
@@ -579,6 +592,9 @@ class PhenFlatten(PhenLayer):
     def __init__(self, nh, nw, hid, wid, name=None):
         super().__init__(nh, nw, hid, wid, "flatten", name)
 
+    def __repr__(self):
+        return 'PhenFlatten('+self._basic_repr_()+")"
+
     def bind_in_model(self, ishaper, oshaper, idx, gshapes, layer_types):
         assert ishaper.dim() >= 2
         assert oshaper.dim() == 1
@@ -615,6 +631,9 @@ class PhenIdentity(PhenLayer):
     def __init__(self, nh, nw, hid, wid, ks, stride, pad, name=None):
         super().__init__(nh, nw, hid, wid, "identity", name)
 
+    def __repr__(self):
+        return 'PhenIdentity('+self._basic_repr_()+")"
+
     def local_forward(self, x:np.ndarray):
         return x
 
@@ -648,6 +667,9 @@ class PhenIdentity(PhenLayer):
 class PhenReLU(PhenLayer):
     def __init__(self, nh, nw, hid, wid, name=None):
         super().__init__(nh, nw, hid, wid, "relu", name)
+
+    def __repr__(self):
+        return 'PhenReLU('+self._basic_repr_()+")"
 
     def local_forward(self, x:np.ndarray):
         if x.dtype is not object:
@@ -691,6 +713,9 @@ class PhenReLU(PhenLayer):
 class PhenSquare(PhenLayer):
     def __init__(self, nh, nw, hid, wid, name=None):
         super().__init__(nh, nw, hid, wid, "square", name)
+
+    def __repr__(self):
+        return 'PhenSquare('+self._basic_repr_()+")"
 
     def local_forward(self, x:np.ndarray):
         if x.dtype is not object:
