@@ -135,14 +135,16 @@ class Worker:
             gshapes.append(s)
             t = lyr.ltype
             layer_types.append(t)
-            if t == "conv":
+            if isinstance(lyr, PhenConv):
                 ss = make_shaper(self.nh, self.nw, 2, s)
-            elif t.endswith('-pool'):
+            elif isinstance(lyr, PhenAvgPool):
                 ss = make_shaper(self.nh, self.nw, 2, s)
-            elif t == 'linear':
+            elif isinstance(lyr, PhenLinear):
                 ss = make_shaper(self.nh, self.nw, 1, s)
-            elif t == 'flatten':
+            elif isinstance(lyr, PhenFlatten):
                 ss = make_shaper(self.nh, self.nw, 1, s)
+            else:
+                print(f'Warning: {type(lyr)} {lyr} is not supported', flush=True)
             shapers.append(ss)
         return gshapes, shapers, layer_types
 
