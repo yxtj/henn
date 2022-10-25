@@ -242,6 +242,7 @@ def conv2d_channel(x, ch, conf:Conv2dConf, weight, bias, out=None):
         for j in range(0, ny - ksy + 1, conf.stride[1]):
             cut = data[:, i:i+ksx, j:j+ksy]
             o = heutil.hewsum(cut.ravel(), weight[ch].ravel(), bias[ch])
+            #o = np.dot(cut.ravel(), weight[ch].ravel())+bias[ch]
             out[oi, oj] = o
             oj += 1
         oi += 1
