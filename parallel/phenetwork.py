@@ -183,6 +183,18 @@ class PhenLayer():
 
 class Phen2DBase(PhenLayer):
 
+    def bind_in_model(self, ishaper:Shaper, oshaper:Shaper,
+                      idx:int, gshapes:list[tuple], layer_types:list[str]):
+        assert ishaper.dim() == 2
+        assert oshaper.dim() == 2
+        super().bind_in_model(ishaper, oshaper, idx, gshapes, layer_types)
+        # inputs:
+        # global coordinate of the upper left pixel (inclusive)
+        inbox = self.ishaper.get_range(self.hid, self.wid)
+        self.gi_ul = (inbox[0], inbox[1])
+        # global coordinate of the lower right pixel (exclusive)
+        self.gi_lr = (inbox[2], inbox[3])
+
     def _calc_depend_hw_(self, hid, wid):
         if hid == self.hid and self.wid == wid:
             lr = self.gi_lr
@@ -392,18 +404,6 @@ class PhenConv(Phen2DBase):
 
     def __repr__(self):
         return 'PhenConv('+self._basic_repr_()+", "+self.conf.__repr__()[12:]+")"
-
-    def bind_in_model(self, ishaper:Shaper, oshaper:Shaper,
-                      idx:int, gshapes:list[tuple], layer_types:list[str]):
-        assert ishaper.dim() == 2
-        assert oshaper.dim() == 2
-        super().bind_in_model(ishaper, oshaper, idx, gshapes, layer_types)
-        # inputs:
-        # global coordinate of the upper left pixel (inclusive)
-        inbox = self.ishaper.get_range(self.hid, self.wid)
-        self.gi_ul = (inbox[0], inbox[1])
-        # global coordinate of the lower right pixel (exclusive)
-        self.gi_lr = (inbox[2], inbox[3])
 
     def local_forward(self, x:np.ndarray):
         # padding
