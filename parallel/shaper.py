@@ -58,8 +58,10 @@ class Shaper:
         """
         raise NotImplementedError("method comp_partly_convered_parts is not implemented")
 
-def make_shaper(nh:int, nw:int, dim:int, data_shape:tuple, **kwargs):
-    assert isinstance(data_shape, tuple)
+def make_shaper(nh:int, nw:int, data_shape:tuple, dim:int=None, **kwargs):
+    assert isinstance(data_shape, (int, tuple))
+    if dim is None:
+        dim = len(data_shape) if isinstance(data_shape, tuple) else 1
     if dim == 1:
         if 'interleave' in kwargs and kwargs['interleave'] is True:
             return Shaper1D_interleave(nh, nw, data_shape[-1:])

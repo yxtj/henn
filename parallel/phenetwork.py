@@ -16,49 +16,62 @@ TIME_BS = 66e-3
 # %% layers
 
 class PhenLayer():
-    def __init__(self, nh, nw, hid, wid, ltype=None, name=None, dim=None):
+    def __init__(self, nh, nw, hid, wid, name=None):
         self.nh = nh
         self.nw = nw
         self.hid = hid
         self.wid = wid
+        self.name = name
         # derivated properties
         self.npart = nh*nw # number of parts in total
         self.pid = hid*nw + wid # part id (sequence id)
         # layer property
-        self.ltype = ltype.lower()
-        if dim is not None:
-            self.dim = dim
+        self.dim = None
+        self.ltype = None
+        if isinstance(self, PhenConv):
+            self.ltype = "conv"
+            self.dim = 2
+        elif isinstance(self, PhenAvgPool):
+            self.ltype = "pool"
+            self.dim = 2
+        elif isinstance(self, PhenFlatten):
+            self.ltype = "flatten"
+            self.dim = 2
+        elif isinstance(self, PhenLinear):
+            self.ltype = "linear"
+            self.dim = 1
+        elif isinstance(self, (PhenReLU, PhenSquare)):
+            self.ltype = "act"
+            self.dim = 0
+        elif isinstance(self, PhenIdentity):
+            self.ltype = "identity"
+            self.dim = 0
         else:
-            if self.ltype == "linear":
-                self.dim = 1
-            elif self.ltype == "conv":
-                self.dim = 2
-            elif self.ltype.endswith("-pool"):
-                self.dim = 2
-            #elif self.ltype.endswith("-pool1d"):
-            #    self.dim = 1
-            elif self.ltype == "flatten":
-                self.dim = 2
-            elif self.ltype == "identity":
-                self.dim = 0
-            elif self.ltype == "relu" or self.ltype == "square":
-                self.dim = 0
-            else:
-                self.dim = 0
-        self.name = name
+            raise NotImplementedError("not supported ltype for {type(self)}")
+        # shape related
+        self.igshape = None
+        self.ogshape = None
+        self.ishaper = None
+        self.oshaper = None
+        # model related
+        self.model = None
+        self.layer_idx = None
 
     def _basic_repr_(self):
         return f'{self.hid}x{self.wid} of {self.nh}x{self.nw}, name={self.name}'
 
-    def bind_in_model(self, ishaper:Shaper, oshaper:Shaper,
-                      idx:int, gshapes:list[tuple], layer_types:list[str]):
+    def bind_in_model(self, inshape, model, idx:int):
+        igshape = inshape if idx==0 else model[idx-1].out_shape_global()
+        self.igshape = igshape
+        self.ogshape = self.out_shape(self.igshape)
+        ishaper = make_shaper(self.nh, self.nw, self.igshape[:self.dim])
+        oshaper = make_shaper(self.nh, self.nw, self.ogshape[:self.dim])
         self.ishaper = ishaper
         self.oshaper = oshaper
         self.layer_idx = idx
-        self.gshapes = gshapes
         if self.name is None:
             self.name = str(idx)
-        #self.layers = layer_types
+        #self.model = model
 
     #def __call__(self, x:np.ndarray):
     #    return self.local_forward(x)
@@ -172,6 +185,16 @@ class PhenLayer():
         """
         raise NotImplementedError("This function is not implemented")
 
+    def in_shape_global(self):
+        assert self.igshape is not None
+        return self.igshape
+
+    def out_shape_global(self):
+        if self.ogshape is None:
+            igs = self.in_shape_global()
+            self.ogshape = self.out_shape(igs)
+        return self.ogshape
+
     def in_shape_local(self):
         self.ishaper.get_shape(self.hid, self.wid)
 
@@ -183,7 +206,7 @@ class PhenLayer():
 
 class Phen2DBase(PhenLayer):
 
-    def bind_in_model(self, ishaper:Shaper, oshaper:Shaper,
+    def bind_in_model(self, model:list[PhenLayer], ishaper:Shaper, oshaper:Shaper,
                       idx:int, gshapes:list[tuple], layer_types:list[str]):
         assert ishaper.dim() == 2
         assert oshaper.dim() == 2
@@ -522,20 +545,19 @@ class PhenLinear(PhenLayer):
         return 'PhenLinear('+self._basic_repr_()+\
             f", in_ch={self.in_ch}, out_ch={self.out_ch}, bias={self.bias is not None})"
 
-    def bind_in_model(self, ishaper:Shaper, oshaper:Shaper,
-                      idx:int, gshapes:list[tuple], layer_types:list[str]):
-        assert ishaper == self.ishaper, f'expect:{self.ishaper}, get:{ishaper}'
-        super().bind_in_model(ishaper, oshaper, idx, gshapes, layer_types)
+    def bind_in_model(self, inshape, model, idx:int):
+        assert idx==0 or len(model[idx-1].out_shape_global()) == 1
+        super().bind_in_model(inshape, model, idx)
         # find last non-trivial layer
         last_idx = idx - 1
-        while last_idx >= 0 and layer_types[last_idx] in [
-                "flatten", "identity", "relu", "square"]:
+        while last_idx >= 0 and not isinstance(model[last_idx], (
+                PhenConv, PhenAvgPool, PhenLinear)):
             last_idx -= 1
         # update the local weights for Conv Layer
-        if idx != 0 and last_idx >= 0 and layer_types[last_idx] == "conv":
+        if idx != 0 and last_idx >= 0 and isinstance(model[last_idx], PhenConv):
             #assert len(gshapes[last_idx]) == 3
-            poshape= gshapes[last_idx+1]
-            pshaper = make_shaper(self.nh, self.nw, 2, poshape)
+            poshape= model[last_idx].out_shape_global()
+            pshaper = make_shaper(self.nh, self.nw, poshape, 2)
             w = self.weight.reshape((self.out_ch, *poshape))
             lw = pshaper.pick_data(self.hid, self.wid, w)
             self.local_weight = lw.reshape(self.out_ch, -1)
@@ -595,10 +617,9 @@ class PhenFlatten(PhenLayer):
     def __repr__(self):
         return 'PhenFlatten('+self._basic_repr_()+")"
 
-    def bind_in_model(self, ishaper, oshaper, idx, gshapes, layer_types):
-        assert ishaper.dim() >= 2
-        assert oshaper.dim() == 1
-        super().bind_in_model(ishaper, oshaper, idx, gshapes, layer_types)
+    def bind_in_model(self, inshape, model, idx):
+        assert len(model[idx-1].out_shape_global()) >= 2
+        super().bind_in_model(inshape, model, idx)
 
     def local_forward(self, x:np.ndarray):
         return x.reshape((-1))

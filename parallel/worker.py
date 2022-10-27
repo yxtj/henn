@@ -59,8 +59,7 @@ class Worker:
         self.ltypes = layer_types
         n = len(model)
         for lid in range(n):
-            model[lid].bind_in_model(shapers[lid], shapers[lid+1],
-                                     lid, gshapes, layer_types)
+            model[lid].bind_in_model(inshape, model, lid)
         self.stat_time_layer_prepare = [0.0 for _ in range(n)]
         self.stat_time_layer_compute = [0.0 for _ in range(n)]
         self.stat_time_layer_postprocess = [0.0 for _ in range(n)]
@@ -136,13 +135,15 @@ class Worker:
             t = lyr.ltype
             layer_types.append(t)
             if isinstance(lyr, PhenConv):
-                ss = make_shaper(self.nh, self.nw, 2, s)
+                ss = make_shaper(self.nh, self.nw, s[:2])
             elif isinstance(lyr, PhenAvgPool):
-                ss = make_shaper(self.nh, self.nw, 2, s)
+                ss = make_shaper(self.nh, self.nw, s[:2])
             elif isinstance(lyr, PhenLinear):
-                ss = make_shaper(self.nh, self.nw, 1, s)
+                ss = make_shaper(self.nh, self.nw, s[:1])
             elif isinstance(lyr, PhenFlatten):
-                ss = make_shaper(self.nh, self.nw, 1, s)
+                ss = make_shaper(self.nh, self.nw, s[:1])
+            elif isinstance(lyr, (PhenReLU, PhenSquare)):
+                ss = make_shaper(self.nh, self.nw, s)
             else:
                 print(f'Warning: {type(lyr)} {lyr} is not supported', flush=True)
             shapers.append(ss)
