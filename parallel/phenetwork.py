@@ -55,20 +55,20 @@ class PhenLayer():
         self.oshaper = None
         # model related
         self.model = None
-        self.layer_idx = None
+        self.lidx = None
 
     def _basic_repr_(self):
         return f'{self.hid}x{self.wid} of {self.nh}x{self.nw}, name={self.name}'
 
-    def bind_in_model(self, inshape, model, idx:int):
+    def bind_in_model(self, inshape:tuple, model, idx:int):
         igshape = inshape if idx==0 else model[idx-1].out_shape_global()
         self.igshape = igshape
         self.ogshape = self.out_shape(self.igshape)
-        ishaper = make_shaper(self.nh, self.nw, self.igshape[:self.dim])
-        oshaper = make_shaper(self.nh, self.nw, self.ogshape[:self.dim])
+        ishaper = make_shaper(self.nh, self.nw, self.igshape[-self.dim:])
+        oshaper = make_shaper(self.nh, self.nw, self.ogshape[-self.dim:])
         self.ishaper = ishaper
         self.oshaper = oshaper
-        self.layer_idx = idx
+        self.lidx = idx
         if self.name is None:
             self.name = str(idx)
         #self.model = model
@@ -206,11 +206,12 @@ class PhenLayer():
 
 class Phen2DBase(PhenLayer):
 
-    def bind_in_model(self, model:list[PhenLayer], ishaper:Shaper, oshaper:Shaper,
-                      idx:int, gshapes:list[tuple], layer_types:list[str]):
-        assert ishaper.dim() == 2
-        assert oshaper.dim() == 2
-        super().bind_in_model(ishaper, oshaper, idx, gshapes, layer_types)
+    def bind_in_model(self, inshape:tuple, model:list[PhenLayer], idx:int):
+        if idx == 0:
+            assert len(inshape) >= 2
+        else:
+            assert len(model[idx-1].out_shape_global()) >= 2
+        super().bind_in_model(inshape, model, idx)
         # inputs:
         # global coordinate of the upper left pixel (inclusive)
         inbox = self.ishaper.get_range(self.hid, self.wid)
@@ -419,7 +420,7 @@ class Phen2DBase(PhenLayer):
 
 class PhenConv(Phen2DBase):
     def __init__(self, nh, nw, hid, wid, conv:hennlayer.Conv2d, name=None):
-        super().__init__(nh, nw, hid, wid, "conv", name)
+        super().__init__(nh, nw, hid, wid, name)
         self.conf = computil.Conv2dConf(conv.in_ch, conv.out_ch, conv.kernel_size,
                                         conv.stride, conv.padding, conv.groups)
         self.weight = conv.weight
@@ -470,7 +471,7 @@ class PhenConv(Phen2DBase):
 
 class PhenAvgPool(PhenLayer):
     def __init__(self, nh, nw, hid, wid, layer:hennlayer.AvgPool2d, name=None):
-        super().__init__(nh, nw, hid, wid, 'avg-pool', name)
+        super().__init__(nh, nw, hid, wid, name)
         self.conf = computil.Pool2dConf(layer.kernel_size, layer.stride,
                                         layer.padding)
         self.factor = 1.0/np.prod(self.conf.kernel_size)
@@ -521,13 +522,13 @@ class PhenAvgPool(PhenLayer):
 
 class PhenLinear(PhenLayer):
     def __init__(self, nh, nw, hid, wid, linear:hennlayer.Linear, name=None):
-        super().__init__(nh, nw, hid, wid, "linear", name)
+        super().__init__(nh, nw, hid, wid, name)
         self.in_ch = linear.in_ch
         self.out_ch = linear.out_ch
         self.weight = linear.weight # shape: out_ch * in_ch
         self.bias = linear.bias # shape: out_ch
         # local computation related
-        ishaper = make_shaper(self.nh, self.nw, 1, (self.in_ch,), interleave=True)
+        ishaper = make_shaper(self.nh, self.nw, (self.in_ch,), 1, interleave=True)
         self.ishaper = ishaper
         # set local weight:
         #   assume the previous layer is also a Linear layer
@@ -612,7 +613,7 @@ class PhenLinear(PhenLayer):
 
 class PhenFlatten(PhenLayer):
     def __init__(self, nh, nw, hid, wid, name=None):
-        super().__init__(nh, nw, hid, wid, "flatten", name)
+        super().__init__(nh, nw, hid, wid, name)
 
     def __repr__(self):
         return 'PhenFlatten('+self._basic_repr_()+")"
@@ -650,7 +651,7 @@ class PhenFlatten(PhenLayer):
 
 class PhenIdentity(PhenLayer):
     def __init__(self, nh, nw, hid, wid, ks, stride, pad, name=None):
-        super().__init__(nh, nw, hid, wid, "identity", name)
+        super().__init__(nh, nw, hid, wid, name)
 
     def __repr__(self):
         return 'PhenIdentity('+self._basic_repr_()+")"
@@ -687,7 +688,7 @@ class PhenIdentity(PhenLayer):
 
 class PhenReLU(PhenLayer):
     def __init__(self, nh, nw, hid, wid, name=None):
-        super().__init__(nh, nw, hid, wid, "relu", name)
+        super().__init__(nh, nw, hid, wid, name)
 
     def __repr__(self):
         return 'PhenReLU('+self._basic_repr_()+")"
@@ -733,7 +734,7 @@ class PhenReLU(PhenLayer):
 
 class PhenSquare(PhenLayer):
     def __init__(self, nh, nw, hid, wid, name=None):
-        super().__init__(nh, nw, hid, wid, "square", name)
+        super().__init__(nh, nw, hid, wid, name)
 
     def __repr__(self):
         return 'PhenSquare('+self._basic_repr_()+")"
