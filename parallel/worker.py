@@ -3,7 +3,8 @@
 import numpy as np
 import time
 from network import Network
-from .phenetwork import PhenLayer, PhenConv, PhenAvgPool, PhenLinear, PhenFlatten, PhenReLU, PhenSquare
+import parallel.phenetwork as pn
+#from .Phenetwork import PhenLayer, PhenConv, PhenAvgPool, PhenLinear, PhenFlatten, PhenReLU, PhenSquare
 from .shaper import make_shaper
 
 
@@ -51,7 +52,7 @@ class Worker:
             self.worker_list_s2m[i] = c
         print(f"Worker {self.hid}-{self.wid} registered in network.", flush=True)
 
-    def init_model(self, model:list[PhenLayer], inshape:tuple):
+    def init_model(self, model:list[pn.PhenLayer], inshape:tuple):
         self.model = model
         gshapes, shapers, layer_types = self.compute_model_meta(model, inshape)
         self.gshapes = gshapes
@@ -76,15 +77,15 @@ class Worker:
             print(f"Worker {self.hid}-{self.wid} at Layer-{lid} {self.ltypes[lid]}",
                   flush=True)
             t = time.time()
-            if isinstance(layer, PhenConv):
+            if isinstance(layer, pn.PhenConv):
                 x = self.comp_conv(x, lid, layer)
-            elif isinstance(layer, PhenAvgPool):
+            elif isinstance(layer, pn.PhenAvgPool):
                 x = self.comp_pool(x, lid, layer)
-            elif isinstance(layer, PhenLinear):
+            elif isinstance(layer, pn.PhenLinear):
                 x = self.comp_linear(x, lid, layer)
-            elif isinstance(layer, PhenFlatten):
+            elif isinstance(layer, pn.PhenFlatten):
                 x = self.comp_flatten(x, lid, layer)
-            elif isinstance(layer, PhenReLU) or isinstance(layer, PhenSquare):
+            elif isinstance(layer, pn.PhenReLU) or isinstance(layer, pn.PhenSquare):
                 x = self.comp_act(x, lid, layer)
             else:
                 print(f"{lid}-th layer of type {self.ltypes[lid]}"
@@ -123,9 +124,9 @@ class Worker:
 
     # inner functions - model prepare
 
-    def compute_model_meta(self, model:list[PhenLayer], inshape:tuple):
+    def compute_model_meta(self, model:list[pn.PhenLayer], inshape:tuple):
         gshapes = [ inshape ]
-        shapers = [ make_shaper(self.nh, self.nw, min(2, len(inshape)), inshape) ]
+        shapers = [ make_shaper(self.nh, self.nw, inshape, min(2, len(inshape))) ]
         layer_types = []
         s = inshape
         for lyr in model:
@@ -134,15 +135,15 @@ class Worker:
             gshapes.append(s)
             t = lyr.ltype
             layer_types.append(t)
-            if isinstance(lyr, PhenConv):
+            if isinstance(lyr, pn.PhenConv):
                 ss = make_shaper(self.nh, self.nw, s[:2])
-            elif isinstance(lyr, PhenAvgPool):
+            elif isinstance(lyr, pn.PhenAvgPool):
                 ss = make_shaper(self.nh, self.nw, s[:2])
-            elif isinstance(lyr, PhenLinear):
+            elif isinstance(lyr, pn.PhenLinear):
                 ss = make_shaper(self.nh, self.nw, s[:1])
-            elif isinstance(lyr, PhenFlatten):
+            elif isinstance(lyr, pn.PhenFlatten):
                 ss = make_shaper(self.nh, self.nw, s[:1])
-            elif isinstance(lyr, (PhenReLU, PhenSquare)):
+            elif isinstance(lyr, (pn.PhenReLU, pn.PhenSquare)):
                 ss = make_shaper(self.nh, self.nw, s)
             else:
                 print(f'Warning: {type(lyr)} {lyr} is not supported', flush=True)
@@ -151,7 +152,7 @@ class Worker:
 
     # inner functions - compute
 
-    def comp_conv(self, x, lid:int, conv:PhenConv):
+    def comp_conv(self, x, lid:int, conv:pn.PhenConv):
         t0 = time.time()
         print(f'  w{self.hid}-{self.wid}: L-{lid} conv-preprocess', flush=True)
         x = self.preprocess(conv, x)
@@ -168,7 +169,7 @@ class Worker:
         self.stat_time_layer_postprocess[lid] = t3-t2
         return x
 
-    def comp_pool(self, x, lid:int, pool:PhenAvgPool):
+    def comp_pool(self, x, lid:int, pool:pn.PhenAvgPool):
         t0 = time.time()
         print(f'  w{self.hid}-{self.wid}: L-{lid} pool-preprocess', flush=True)
         x = self.preprocess(pool, x)
@@ -185,7 +186,7 @@ class Worker:
         self.stat_time_layer_postprocess[lid] = t3-t2
         return x
 
-    def comp_linear(self, x, lid:int, fc:PhenLinear):
+    def comp_linear(self, x, lid:int, fc:pn.PhenLinear):
         t0 = time.time()
         print(f'  w{self.hid}-{self.wid}: L-{lid} fc-preprocess', flush=True)
         x = self.preprocess(fc, x)
@@ -202,14 +203,14 @@ class Worker:
         self.stat_time_layer_postprocess[lid] = t3-t2
         return x
 
-    def comp_flatten(self, x, lid:int, fn:PhenFlatten):
+    def comp_flatten(self, x, lid:int, fn:pn.PhenFlatten):
         t = time.time()
         x = fn.local_forward(x)
         t = time.time() - t
         self.stat_time_layer_compute[lid] = t
         return x
 
-    def comp_act(self, x, lid:int, act:PhenReLU):
+    def comp_act(self, x, lid:int, act:pn.PhenReLU):
         t = time.time()
         print(f'  w{self.hid}-{self.wid}: L-{lid} act-forward', flush=True)
         x = act.local_forward(x)
@@ -220,7 +221,7 @@ class Worker:
 
     # inner functions - data
 
-    def preprocess(self, layer:PhenLayer, x:np.ndarray):
+    def preprocess(self, layer:pn.PhenLayer, x:np.ndarray):
         # prepare data depdency
         rqtgts = layer.depend_out(x)
         #print(f'w{self.hid}-{self.wid}: send {len(rqtgts)}', flush=True)
@@ -240,7 +241,7 @@ class Worker:
         x = layer.depend_merge(x, xlist)
         return x
 
-    def postprocess(self, layer:PhenLayer, x:np.ndarray):
+    def postprocess(self, layer:pn.PhenLayer, x:np.ndarray):
         # load balance
         tgts = layer.join_out(x)
         #print(f'w{self.hid}-{self.wid}: send {len(tgts)}', flush=True)
