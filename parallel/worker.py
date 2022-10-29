@@ -24,9 +24,7 @@ class Worker:
         self.worker_list_s2m = {} # map serial worker id (hid, wid) to matrix id
         # neural network
         self.model = None
-        self.gshapes = None
-        self.shapers = None
-        self.ltypes = None
+        self.inshape = None
         # statistic - network
         self.stat_send_msg = 0
         self.stat_send_byte = 0
@@ -54,10 +52,7 @@ class Worker:
 
     def init_model(self, model:list[pn.PhenLayer], inshape:tuple):
         self.model = model
-        gshapes, shapers, layer_types = self.compute_model_meta(model, inshape)
-        self.gshapes = gshapes
-        self.shapers = shapers
-        self.ltypes = layer_types
+        self.inshape = inshape
         n = len(model)
         for lid in range(n):
             model[lid].bind_in_model(inshape, model, lid)
@@ -69,12 +64,12 @@ class Worker:
 
     def run(self, data:np.ndarray, complete_input=True):
         if complete_input == True:
-            s = self.shapers[0]
+            s = self.model[0].ishaper
             x = s.pick_data(self.hid, self.wid, data)
         else:
             x = data
         for lid, layer in enumerate(self.model):
-            print(f"Worker {self.hid}-{self.wid} at Layer-{lid} {self.ltypes[lid]}",
+            print(f"Worker {self.hid}-{self.wid} at Layer-{lid} {self.model[lid].ltype}",
                   flush=True)
             t = time.time()
             if isinstance(layer, pn.PhenConv):
@@ -88,7 +83,7 @@ class Worker:
             elif isinstance(layer, pn.PhenReLU) or isinstance(layer, pn.PhenSquare):
                 x = self.comp_act(x, lid, layer)
             else:
-                print(f"{lid}-th layer of type {self.ltypes[lid]}"
+                print(f"{lid}-th layer of type {self.model[lid].ltype}"
                       " is not supported", flush=True)
             self.sync()
             t = time.time() - t
@@ -121,34 +116,6 @@ class Worker:
             f"send time: {self.stat_time_send}, recv time: {self.stat_time_recv}"
         #print(s, flush=True)
         return s
-
-    # inner functions - model prepare
-
-    def compute_model_meta(self, model:list[pn.PhenLayer], inshape:tuple):
-        gshapes = [ inshape ]
-        shapers = [ make_shaper(self.nh, self.nw, inshape, min(2, len(inshape))) ]
-        layer_types = []
-        s = inshape
-        for lyr in model:
-            #print(s, lyr)
-            s = lyr.out_shape(s)
-            gshapes.append(s)
-            t = lyr.ltype
-            layer_types.append(t)
-            if isinstance(lyr, pn.PhenConv):
-                ss = make_shaper(self.nh, self.nw, s[:2])
-            elif isinstance(lyr, pn.PhenAvgPool):
-                ss = make_shaper(self.nh, self.nw, s[:2])
-            elif isinstance(lyr, pn.PhenLinear):
-                ss = make_shaper(self.nh, self.nw, s[:1])
-            elif isinstance(lyr, pn.PhenFlatten):
-                ss = make_shaper(self.nh, self.nw, s[:1])
-            elif isinstance(lyr, (pn.PhenReLU, pn.PhenSquare)):
-                ss = make_shaper(self.nh, self.nw, s)
-            else:
-                print(f'Warning: {type(lyr)} {lyr} is not supported', flush=True)
-            shapers.append(ss)
-        return gshapes, shapers, layer_types
 
     # inner functions - compute
 
