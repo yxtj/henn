@@ -26,8 +26,8 @@ class PhenLayer():
         self.npart = nh*nw # number of parts in total
         self.pid = hid*nw + wid # part id (sequence id)
         # layer property
-        self.dim = None
-        self.ltype = None
+        self.dim = None #
+        self.ltype = None # layer type
         if isinstance(self, PhenConv):
             self.ltype = "conv"
             self.dim = 2
@@ -55,7 +55,7 @@ class PhenLayer():
         self.oshaper = None
         # model related
         self.model = None
-        self.lidx = None
+        self.lidx = None # layer index in the model
 
     def _basic_repr_(self):
         return f'{self.hid}x{self.wid} of {self.nh}x{self.nw}, name={self.name}'
@@ -64,6 +64,11 @@ class PhenLayer():
         igshape = inshape if idx==0 else model[idx-1].out_shape_global()
         self.igshape = igshape
         self.ogshape = self.out_shape(self.igshape)
+        if self.dim == 0: # activation or identity
+            if idx != 0:
+                self.dim = model[idx-1].dim
+            else:
+                self.dim = min(2, len(inshape))
         ishaper = make_shaper(self.nh, self.nw, self.igshape[-self.dim:])
         oshaper = make_shaper(self.nh, self.nw, self.ogshape[-self.dim:])
         self.ishaper = ishaper
